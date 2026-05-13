@@ -41,8 +41,13 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pocroot}
       GATEWAY_BASE_URL: http://poc-gateway:8080
       GATEWAY_API_KEY: ${INTERNAL_API_KEY:-dev-poc-key}
+      JAVA_OPTS: "-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxRAMPercentage=50.0"
     ports:
       - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     depends_on:
       mysql:
         condition: service_healthy
