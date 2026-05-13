@@ -1,0 +1,53 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-pocroot}
+      MYSQL_USER: ${MYSQL_USER:-poc}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pocroot}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  poc-gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    environment:
+      MYSQL_DSN: root:${MYSQL_PASSWORD:-pocroot}@tcp(mysql:3306)/ttpos_poc_biz?charset=utf8mb4&parseTime=True&loc=Local
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-poc-key}
+      WARM_FLOW_BASE_URL: http://warm-flow:8081
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  warm-flow:
+    build:
+      context: ./warm-flow-app
+      dockerfile: Dockerfile
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pocroot}
+      GATEWAY_BASE_URL: http://poc-gateway:8080
+      GATEWAY_API_KEY: ${INTERNAL_API_KEY:-dev-poc-key}
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      poc-gateway:
+        condition: service_started
+
+volumes:
+  mysql_data:

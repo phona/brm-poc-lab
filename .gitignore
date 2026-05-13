@@ -1,0 +1,5 @@
+.env
+gateway/gateway
+*.log
+target/
+.idea/

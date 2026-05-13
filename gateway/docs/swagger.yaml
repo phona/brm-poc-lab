@@ -1,0 +1,503 @@
+basePath: /
+definitions:
+  main.Envelope:
+    properties:
+      code:
+        example: 0
+        type: integer
+      data: {}
+      message:
+        type: string
+    type: object
+  main.PocCcEvent:
+    properties:
+      businessId:
+        type: string
+      ccUserIds:
+        type: string
+      id:
+        type: integer
+      nodeCode:
+        type: string
+      timing:
+        type: string
+    type: object
+  main.aggregatedTodoItem:
+    properties:
+      fromShop:
+        type: string
+      nodeCode:
+        type: string
+      orderAmount:
+        type: integer
+      orderNo:
+        type: string
+      taskId:
+        type: integer
+      taskName:
+        type: string
+      toShop:
+        type: string
+    type: object
+  main.ccRecordReq:
+    properties:
+      businessId:
+        type: string
+      ccUserIds:
+        items:
+          type: string
+        type: array
+      nodeCode:
+        type: string
+      timing:
+        type: string
+    type: object
+  main.flowFinishedReq:
+    properties:
+      businessId:
+        type: string
+      status:
+        type: string
+    type: object
+  main.resolveData:
+    properties:
+      userIds:
+        items:
+          type: string
+        type: array
+    type: object
+  main.resolveReq:
+    properties:
+      businessId:
+        type: string
+      roleCode:
+        type: string
+      variables:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  main.submitStartReq:
+    properties:
+      ccUserIds:
+        items:
+          type: string
+        type: array
+      createBy:
+        type: string
+      flowCode:
+        type: string
+      orderNo:
+        type: string
+      variables:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  main.wfSkipReq:
+    properties:
+      handler:
+        type: string
+      message:
+        type: string
+      skipType:
+        type: string
+      taskId:
+        type: integer
+    type: object
+  main.wfTerminateReq:
+    properties:
+      handler:
+        type: string
+      message:
+        type: string
+      taskId:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: API Support
+  description: 'Internal gateway: mock business DB, CC audit, and Warm-Flow HTTP proxy.
+    Send X-API-KEY on /internal/poc/warm-flow/* (see Authorize in Swagger UI).'
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Warm-Flow PoC BFF API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Returns plain text ok
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+      summary: Liveness
+      tags:
+      - public
+  /internal/poc/warm-flow/cc-record:
+    get:
+      description: Returns the latest 50 CC rows, newest first. Optional query businessId
+        filters to one order. For debugging and PoC verification.
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Filter by business id
+        in: query
+        name: businessId
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/main.PocCcEvent'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: List CC records
+      tags:
+      - internal
+    post:
+      consumes:
+      - application/json
+      description: 'Persists one CC (carbon-copy) audit row when the engine fires
+        a CC / notify step. Body: businessId, nodeCode, timing, ccUserIds array. Stored
+        in poc_cc_event as JSON text for ccUserIds.'
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.ccRecordReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Record CC event
+      tags:
+      - internal
+  /internal/poc/warm-flow/flow-finished:
+    post:
+      consumes:
+      - application/json
+      description: Java TaskListener invokes this when the flow instance ends. Sets
+        poc_mock_transfer_order.status for the given businessId (order no). Body status
+        defaults to approved if empty (e.g. completed path).
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.flowFinishedReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Flow finished callback
+      tags:
+      - internal
+  /internal/poc/warm-flow/resolve-approver:
+    post:
+      consumes:
+      - application/json
+      description: 'Warm-Flow calls this webhook to resolve handler user IDs for a
+        node. PoC: looks up mock transfer order by businessId (order no), then for
+        roleCode RECEIVER_MANAGER returns the receiving shop''s region_manager_user_id
+        from poc_mock_shop.'
+      parameters:
+      - default: dev-poc-key
+        description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.resolveReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/main.resolveData'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Resolve approvers by business + role
+      tags:
+      - internal
+  /internal/poc/warm-flow/task/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 'Proxies to Warm-Flow POST /api/task/cancel. Cancels the instance
+        (PoC TB-1004). Same body shape as terminate: taskId, handler, message.'
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.wfTerminateReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Cancel task / flow
+      tags:
+      - internal
+  /internal/poc/warm-flow/task/skip:
+    post:
+      consumes:
+      - application/json
+      description: Proxies to Warm-Flow POST /api/task/skip. Use to approve/pass the
+        current human task (taskId, handler, message; skipType optional). Do not use
+        for reject—use /task/terminate instead for PoC reject path.
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.wfSkipReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Skip / approve task
+      tags:
+      - internal
+  /internal/poc/warm-flow/task/terminate:
+    post:
+      consumes:
+      - application/json
+      description: Proxies to Warm-Flow POST /api/task/terminate. Ends the instance
+        with reject-style termination (PoC TB-1003). Updates downstream status via
+        flow-finished when engine completes.
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.wfTerminateReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Terminate task (reject)
+      tags:
+      - internal
+  /internal/poc/warm-flow/tasks/todo:
+    get:
+      description: Calls Warm-Flow GET /api/task/todo?handler=userId, then enriches
+        each task with amount, fromShop, and toShop from poc_mock_transfer_order.
+        Use this BFF endpoint for an approval todo list in client apps instead of
+        calling Warm-Flow directly.
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Handler user id
+        in: query
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/main.aggregatedTodoItem'
+                  type: array
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Aggregated todo list
+      tags:
+      - internal
+  /internal/poc/warm-flow/transfer/submit-start:
+    post:
+      consumes:
+      - application/json
+      description: Sets mock order status to approving, then POSTs /api/flow/start
+        to Warm-Flow with businessId=orderNo, flowCode, handler=createBy, and variables
+        (including optional ccUserIds as array). Returns engine JSON inside envelope
+        data on success. Typical first call from app when submitting a transfer for
+        approval.
+      parameters:
+      - description: API key
+        in: header
+        name: X-API-KEY
+        required: true
+        type: string
+      - description: Payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/main.submitStartReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/main.Envelope'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/main.Envelope'
+      security:
+      - ApiKeyAuth: []
+      summary: Start transfer flow
+      tags:
+      - internal
+schemes:
+- http
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: X-API-KEY
+    type: apiKey
+swagger: "2.0"

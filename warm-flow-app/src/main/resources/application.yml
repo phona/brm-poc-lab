@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:3306/ttpos_poc_flow?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:pocroot}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+server:
+  port: 8081
+
+warm-flow:
+  enabled: true
+  banner: false
+
+poc:
+  gateway:
+    base-url: ${GATEWAY_BASE_URL:http://poc-gateway:8080}
+    api-key: ${GATEWAY_API_KEY:dev-poc-key}
+
+logging:
+  level:
+    org.dromara.warm: INFO
+    com.ttpos.poc: DEBUG

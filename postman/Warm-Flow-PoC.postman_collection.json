@@ -1,0 +1,84 @@
+{
+  "info": {
+    "name": "Warm-Flow PoC (brm-poc-lab)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "go_base", "value": "http://127.0.0.1:8080" },
+    { "key": "java_base", "value": "http://127.0.0.1:8081" },
+    { "key": "x_api_key", "value": "dev-poc-key" },
+    { "key": "task_ship", "value": "" },
+    { "key": "task_recv", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1 health (gateway)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{go_base}}/health"
+      }
+    },
+    {
+      "name": "2 submit + start flow",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-KEY", "value": "{{x_api_key}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderNo\": \"TB-1001\",\n  \"flowCode\": \"transfer_test\",\n  \"createBy\": \"user_01\",\n  \"variables\": {\n    \"fromShop\": \"Shop A\",\n    \"toShop\": \"Shop B\"\n  }\n}"
+        },
+        "url": "{{go_base}}/internal/poc/warm-flow/transfer/submit-start"
+      }
+    },
+    {
+      "name": "3 list todo (user_01) direct Java",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{java_base}}/api/task/todo?handler=user_01"
+      }
+    },
+    {
+      "name": "4 skip node2 (ship) via gateway",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-KEY", "value": "{{x_api_key}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"taskId\": {{task_ship}},\n  \"handler\": \"user_01\",\n  \"message\": \"ok\"\n}"
+        },
+        "url": "{{go_base}}/internal/poc/warm-flow/task/skip"
+      }
+    },
+    {
+      "name": "5 aggregated todo (user_03) BFF",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-API-KEY", "value": "{{x_api_key}}" }],
+        "url": "{{go_base}}/internal/poc/warm-flow/tasks/todo?userId=user_03"
+      }
+    },
+    {
+      "name": "6 skip node3 (recv) via gateway",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-KEY", "value": "{{x_api_key}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"taskId\": {{task_recv}},\n  \"handler\": \"user_03\",\n  \"message\": \"approve\"\n}"
+        },
+        "url": "{{go_base}}/internal/poc/warm-flow/task/skip"
+      }
+    }
+  ]
+}
