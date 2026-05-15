@@ -25,6 +25,13 @@ require() {
 require curl
 require jq
 
+# Java long IDs (snowflake ~2e18) exceed JS MAX_SAFE_INTEGER, so jq loses precision.
+# Extract them as raw digit strings straight from the JSON text instead of via jq.
+extract_id() {
+  local field="$1" body="$2"
+  echo "$body" | grep -oE "\"$field\"[[:space:]]*:[[:space:]]*[0-9]+" | head -1 | grep -oE '[0-9]+$'
+}
+
 info "wait for gateway"
 for i in $(seq 1 30); do
   if curl -sf "$GW/health" >/dev/null; then break; fi
@@ -74,7 +81,7 @@ start_resp=$(curl -s -X POST "$GW/api/v1/ttpos/flow/start" \
   -d "{\"businessId\":\"$BIZ_ID\",\"flowCode\":\"ttpos_transfer_test\"}")
 echo "$start_resp" | jq .
 
-inst_id=$(echo "$start_resp" | jq -r '.data.engineResponse.instanceId // empty')
+inst_id=$(extract_id instanceId "$start_resp")
 if [ -z "$inst_id" ]; then
   ng "flow.start failed: $start_resp"
   exit 1
@@ -87,21 +94,22 @@ ok "started instance $inst_id for biz $BIZ_ID (company 1001)"
 # Eve (10013) should NOT be in the permissionList.
 
 # Fetch tasks of this instance and inspect the approve task.
-tasks=$(curl -sf "$GW/internal/poc/warm-flow/instance/tasks?instanceId=$inst_id" \
-  -H "X-API-KEY: dev-poc-key" | jq -r '.data.list')
-echo "$tasks" | jq .
-task_id=$(echo "$tasks" | jq -r '.[] | select(.nodeCode=="ttpos_approve") | .taskId')
+tasks_resp=$(curl -sf "$GW/internal/poc/warm-flow/instance/tasks?instanceId=$inst_id" \
+  -H "X-API-KEY: dev-poc-key")
+echo "$tasks_resp"
+# Pull the taskId associated with nodeCode ttpos_approve via grep block-by-block (precision-safe).
+task_id=$(echo "$tasks_resp" | tr '}' '\n' | grep '"nodeCode":"ttpos_approve"' | grep -oE '"taskId":[0-9]+' | head -1 | grep -oE '[0-9]+')
 if [ -z "$task_id" ]; then
   ng "no ttpos_approve task found"
   exit 1
 fi
 ok "ttpos_approve task = $task_id"
 
-# Read its permissionList via /api/task/detail
+# Read its permissionList via /api/task/detail. handlers[] are uint64 strings (gateway converts).
 detail=$(curl -sf "$GW/internal/poc/warm-flow/task/detail?taskId=$task_id" \
-  -H "X-API-KEY: dev-poc-key" | jq -r '.data')
+  -H "X-API-KEY: dev-poc-key")
 echo "$detail" | jq .
-handlers=$(echo "$detail" | jq -r '.handlers[]?' | tr '\n' ',' | sed 's/,$//')
+handlers=$(echo "$detail" | jq -r '.data.handlers[]?' | tr '\n' ',' | sed 's/,$//')
 info "resolved handlers: [$handlers]"
 
 contains() { echo ",$1," | grep -q ",$2,"; }
@@ -142,15 +150,15 @@ start2=$(curl -s -X POST "$GW/api/v1/ttpos/flow/start" \
   -H "Authorization: Bearer $TOKEN_CAROL" \
   -H "Content-Type: application/json" \
   -d "{\"businessId\":\"$BIZ_ID2\",\"flowCode\":\"ttpos_transfer_test\"}")
-inst2=$(echo "$start2" | jq -r '.data.engineResponse.instanceId // empty')
-[ -n "$inst2" ] && ok "started instance $inst2 for company 1002" || { ng "start2 failed"; exit 1; }
+inst2=$(extract_id instanceId "$start2")
+[ -n "$inst2" ] && ok "started instance $inst2 for company 1002" || { ng "start2 failed: $start2"; exit 1; }
 
-tasks2=$(curl -sf "$GW/internal/poc/warm-flow/instance/tasks?instanceId=$inst2" \
-  -H "X-API-KEY: dev-poc-key" | jq -r '.data.list')
-task_id2=$(echo "$tasks2" | jq -r '.[] | select(.nodeCode=="ttpos_approve") | .taskId')
+tasks_resp2=$(curl -sf "$GW/internal/poc/warm-flow/instance/tasks?instanceId=$inst2" \
+  -H "X-API-KEY: dev-poc-key")
+task_id2=$(echo "$tasks_resp2" | tr '}' '\n' | grep '"nodeCode":"ttpos_approve"' | grep -oE '"taskId":[0-9]+' | head -1 | grep -oE '[0-9]+')
 detail2=$(curl -sf "$GW/internal/poc/warm-flow/task/detail?taskId=$task_id2" \
-  -H "X-API-KEY: dev-poc-key" | jq -r '.data')
-handlers2=$(echo "$detail2" | jq -r '.handlers[]?' | tr '\n' ',' | sed 's/,$//')
+  -H "X-API-KEY: dev-poc-key")
+handlers2=$(echo "$detail2" | jq -r '.data.handlers[]?' | tr '\n' ',' | sed 's/,$//')
 info "company 1002 handlers: [$handlers2]"
 
 contains "$handlers2" "10021" && ok "Carol (10021, shop1002) in handlers" || ng "Carol missing"
