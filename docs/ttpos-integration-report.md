@@ -82,14 +82,47 @@ passed: 12+   failed: 0
 
 每一项都是"加 1–2 天工"的事，不是架构变更。
 
-## 六、PoC 沙箱状态说明
+## 六、vm08 端到端跑通记录（2026-05-15）
 
-本次实施在沙箱环境中**未能跑通端到端测试**——沙箱无 docker / go。已交付：
+在 vm-node08（43.239.84.28）clone 仓库执行 `docker compose up -d --build`，
+跑 `./scripts/verify-ttpos-integration.sh` 结果：
 
-- ✅ 全部代码改动（5 个新/改文件）
-- ✅ 种子数据 SQL
-- ✅ 流程定义
-- ✅ 一键验证脚本
-- ⏳ 端到端跑通：需在有 docker 的开发机执行 `docker compose up -d --build && ./scripts/verify-ttpos-integration.sh`
+```
+passed: 14   failed: 0
+```
 
-跑完把 `passed/failed` 行贴回来，如果有 fail 我按上面表格定位。
+涵盖：JWT 透传 / 动态审批人解析 / 引擎强制鉴权 / 多租户隔离。
+
+### 跑通过程踩到的三个真实坑（已修）
+
+| # | 现象 | 根因 | 修法 | 提交 |
+|---|------|------|------|------|
+| 1 | `/api/flow/start` 500：`Unknown column 'any_node_skip'` | seed schema (`03-warm-flow-all.sql`) 是 1.3.3 时代的，1.3.8 SELECT 多查了一列 | seed SQL 补列 | `1d4eac5` |
+| 2 | gateway 返回的 instanceId 末 2 位被截断（`...02` → `...00`），下游用 ID 查不到任何记录 | Go `encoding/json` 解 `map[string]any` 数字默认走 float64，Java long snowflake（~2×10¹⁸）超过双精度安全整数范围 | wfClient 改 `json.Decoder.UseNumber()` 保原始数字串 | `1d4eac5` |
+| 3 | 多审批人 SpEL（`#{#approvers}` = `"10011@@10012"`）解析后引擎对所有 caller 拒绝 | 1.3.8 只对**定义时字面量**的 `@@` permissionFlag 做拆分入 `flow_user` 多行；SpEL 运行时解析值不拆分，落成单行 `processed_by="10011@@10012"`，checkAuth 不命中 | 单审批人 SpEL `#{#approver}`（PoC 范围够用）；多审批人需要 custom Handler bean | `c13e8ef` |
+
+第 2 坑是**通用的 Java/JS 大整数互操作问题**——Flutter / Web 前端调 Java 引擎也会踩，与本 PoC 无关。建议生产化时统一约定：所有 long ID 在 Java 控制器序列化为 string。
+
+第 3 坑是当前 PoC 的**已知局限**：动态多审批人（含会签/票签）走 SpEL 时被 1.3.8 该 quirk 卡住。
+解决方案二选一：
+- **a. 自写 Handler**：在 Warm-Flow 加个 Spring bean 实现 `org.dromara.warm.flow.core.handler.PermissionHandler`，从 variables 拿 list 返回。约 50 行代码。
+- **b. 定义时拼接 + Pre-resolve list 长度**：业务上能枚举的角色用定义时 `@@`，动态人单独节点 + addSignature。复杂度高。
+
+推荐 a。
+
+### 最终链路证据
+
+```
+JWT(company=1001, staff=10011)
+  → gateway 解 JWT
+  → ttposStaffsByAccessPath(1001, "transfer_order_approve") → [10011, 10012]   ← 真 ttpos RBAC 查询
+  → pick caller eligible → 10011
+  → /api/flow/start variable.approver=10011
+  → engine 把 SpEL 解析为 10011 → flow_user.processed_by=10011
+  → Eve (10013) skip   → checkAuth 拒绝 ✗
+  → Alice (10011) skip → 引擎放行 ✓，流程结束（flowStatus=8）
+
+JWT(company=1002, staff=10021)
+  → ttposStaffsByAccessPath(1002, ...) → [10021, 10022]   ← shop1002 库，不串
+  → flow_user.processed_by=10021                          ← 0 个 shop1001 staff 出现
+```
