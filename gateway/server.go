@@ -631,11 +631,19 @@ func (s *Server) PostTtposFlowStart(c *gin.Context) {
 		failJSON(c, -1, "no eligible approvers in ttpos for transfer_order_approve")
 		return
 	}
-	strs := make([]string, len(ids))
-	for i, u := range ids {
-		strs[i] = strconv.FormatUint(u, 10)
+	// Pick a single approver: prefer the JWT caller if they're eligible (typical
+	// "submit-and-self-approve test" shape), else first eligible.
+	// (Multi-approver via SpEL is a separate quirk: 1.3.8 doesn't split @@ for
+	// SpEL-resolved values into multiple flow_user rows, so we'd need a custom
+	// handler. Out of scope for this integration PoC.)
+	picked := ids[0]
+	for _, u := range ids {
+		if u == staffUuid {
+			picked = u
+			break
+		}
 	}
-	vars["approvers"] = strings.Join(strs, "@@")
+	vars["approver"] = strconv.FormatUint(picked, 10)
 
 	body := wfStartReq{
 		BusinessID: req.BusinessID,

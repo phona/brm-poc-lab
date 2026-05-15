@@ -112,10 +112,17 @@ echo "$detail" | jq .
 handlers=$(echo "$detail" | jq -r '.data.handlers[]?' | tr '\n' ',' | sed 's/,$//')
 info "resolved handlers: [$handlers]"
 
-contains() { echo ",$1," | grep -q ",$2,"; }
-contains "$handlers" "10011" && ok "Alice (10011) in handlers"          || ng "Alice missing from handlers"
-contains "$handlers" "10012" && ok "Bob/superadmin (10012) in handlers"  || ng "Bob missing from handlers"
-contains "$handlers" "10013" && ng "Eve (10013) leaked into handlers"   || ok "Eve correctly excluded"
+# Gateway picked: JWT caller if eligible, else first eligible. Alice (10011) is the
+# caller AND eligible (holds the access), so she should be the chosen approver.
+# Substring check is safe because handlers contains a single uuid string.
+case "$handlers" in
+  *10011*) ok "Alice (10011) is the resolved approver" ;;
+  *)       ng "Alice missing from handlers: [$handlers]" ;;
+esac
+case "$handlers" in
+  *10013*) ng "Eve (10013) leaked into handlers" ;;
+  *)       ok "Eve correctly excluded" ;;
+esac
 
 # ------- Assertion 3: Engine enforces handler binding (Eve cannot approve, Alice can) -------
 info "Assertion 3: engine enforces resolved permissionList"
@@ -161,10 +168,19 @@ detail2=$(curl -sf "$GW/internal/poc/warm-flow/task/detail?taskId=$task_id2" \
 handlers2=$(echo "$detail2" | jq -r '.data.handlers[]?' | tr '\n' ',' | sed 's/,$//')
 info "company 1002 handlers: [$handlers2]"
 
-contains "$handlers2" "10021" && ok "Carol (10021, shop1002) in handlers" || ng "Carol missing"
-contains "$handlers2" "10022" && ok "Dave (10022, shop1002 super) in handlers" || ng "Dave missing"
-contains "$handlers2" "10011" && ng "shop1001 Alice leaked into shop1002!" || ok "shop1001 Alice NOT in shop1002 handlers"
-contains "$handlers2" "10012" && ng "shop1001 Bob leaked into shop1002!"  || ok "shop1001 Bob NOT in shop1002 handlers"
+# JWT caller Carol (10021) is eligible → expect her as the chosen approver.
+case "$handlers2" in
+  *10021*) ok "Carol (10021, shop1002) is the resolved approver" ;;
+  *)       ng "Carol missing from handlers: [$handlers2]" ;;
+esac
+case "$handlers2" in
+  *10011*) ng "shop1001 Alice leaked into shop1002!" ;;
+  *)       ok "shop1001 Alice NOT in shop1002 handlers" ;;
+esac
+case "$handlers2" in
+  *10012*) ng "shop1001 Bob leaked into shop1002!" ;;
+  *)       ok "shop1001 Bob NOT in shop1002 handlers" ;;
+esac
 
 echo
 echo "===================="

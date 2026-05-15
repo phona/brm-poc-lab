@@ -91,12 +91,12 @@ public class FlowBootstrap implements ApplicationRunner {
         approve.setNodeType(NodeType.BETWEEN.getKey());
         approve.setVersion("1");
         // Warm-Flow 1.3.8 pre-resolve pattern (matches the existing recvApprover one):
-        // gateway looks up ttpos RBAC at /flow/start time and injects the resolved
-        // staff list as variable 'approvers' (joined with @@). SpEL pulls it here.
-        // (Runtime webhook listener exists but fires AFTER flow_user is persisted in
-        //  1.3.8, so it can't drive the FIRST task's permission check — see commit
-        //  history. Pre-resolve is the documented 1.3.8 path.)
-        approve.setPermissionFlag("#{#approvers}");
+        // gateway looks up ttpos RBAC at /flow/start time, picks one eligible staff,
+        // and injects as variable 'approver'. SpEL pulls it here.
+        // (Multi-approver via SpEL hits a 1.3.8 quirk where '@@' isn't split into
+        //  separate flow_user rows for SpEL-resolved values — would need a custom
+        //  Handler bean. Single approver is enough to prove the JWT→RBAC→engine path.)
+        approve.setPermissionFlag("#{#approver}");
         approve.setSkipList(List.of(skip("ttpos_approve", NodeType.BETWEEN.getKey(), "end", NodeType.END.getKey(), SkipType.PASS.getKey())));
 
         FlowNode end = new FlowNode();
