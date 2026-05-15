@@ -90,13 +90,13 @@ public class FlowBootstrap implements ApplicationRunner {
         approve.setNodeName("ttpos RBAC 审批");
         approve.setNodeType(NodeType.BETWEEN.getKey());
         approve.setVersion("1");
-        // Engine sees WEBHOOK_RESOLVE: prefix and the listener resolves it at runtime.
-        // Use 'create' type: fires when the engine creates the next node's task, BEFORE
-        // flow_user records are persisted from permissionFlag (the 'assignment' type
-        // existed in earlier versions but is unreliable in 1.3.8).
-        approve.setPermissionFlag("WEBHOOK_RESOLVE:ACCESS:transfer_order_approve");
-        approve.setListenerType("create");
-        approve.setListenerPath(WebhookPermissionListener.class.getName());
+        // Warm-Flow 1.3.8 pre-resolve pattern (matches the existing recvApprover one):
+        // gateway looks up ttpos RBAC at /flow/start time and injects the resolved
+        // staff list as variable 'approvers' (joined with @@). SpEL pulls it here.
+        // (Runtime webhook listener exists but fires AFTER flow_user is persisted in
+        //  1.3.8, so it can't drive the FIRST task's permission check — see commit
+        //  history. Pre-resolve is the documented 1.3.8 path.)
+        approve.setPermissionFlag("#{#approvers}");
         approve.setSkipList(List.of(skip("ttpos_approve", NodeType.BETWEEN.getKey(), "end", NodeType.END.getKey(), SkipType.PASS.getKey())));
 
         FlowNode end = new FlowNode();

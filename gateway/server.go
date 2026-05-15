@@ -615,10 +615,27 @@ func (s *Server) PostTtposFlowStart(c *gin.Context) {
 	for k, v := range req.Variable {
 		vars[k] = v
 	}
-	// Critical: stamp companyUuid into flow variables so dynamic-approver webhooks
-	// know which tenant DB to query when resolving ACCESS:<path>.
 	vars["companyUuid"] = u64ToStr(companyUuid)
 	vars["createBy"] = u64ToStr(staffUuid)
+
+	// Pre-resolve dynamic approver via ttpos RBAC and pass as flow variable.
+	// Warm-Flow 1.3.8 listener-based resolution fires AFTER flow_user rows are
+	// derived from permissionFlag, so it cannot drive the first task's check.
+	// We do the lookup here, scoped to JWT companyUuid → shop{n} tenant DB.
+	ids, err := s.ttposStaffsByAccessPath(companyUuid, "transfer_order_approve")
+	if err != nil {
+		failJSON(c, -1, "ttpos rbac lookup failed: "+err.Error())
+		return
+	}
+	if len(ids) == 0 {
+		failJSON(c, -1, "no eligible approvers in ttpos for transfer_order_approve")
+		return
+	}
+	strs := make([]string, len(ids))
+	for i, u := range ids {
+		strs[i] = strconv.FormatUint(u, 10)
+	}
+	vars["approvers"] = strings.Join(strs, "@@")
 
 	body := wfStartReq{
 		BusinessID: req.BusinessID,
