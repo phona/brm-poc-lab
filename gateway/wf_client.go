@@ -47,7 +47,7 @@ func (w *wfClient) postJSON(path string, body any, out any) error {
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	return decodeBigIntSafe(raw, out)
 }
 
 func (w *wfClient) getJSON(path string, out any) error {
@@ -67,5 +67,15 @@ func (w *wfClient) getJSON(path string, out any) error {
 	if res.StatusCode >= 300 {
 		return fmt.Errorf("warm-flow %s: %s", res.Status, string(raw))
 	}
-	return json.Unmarshal(raw, out)
+	return decodeBigIntSafe(raw, out)
+}
+
+// decodeBigIntSafe preserves Java long IDs (snowflake ~2e18 > JS MAX_SAFE_INTEGER).
+// Default json.Unmarshal into map[string]any uses float64, which silently truncates
+// the last few digits of long IDs (observed instance_id 2055306609218969602 ->
+// gateway reported 2055306609218969600). UseNumber keeps the raw digit string.
+func decodeBigIntSafe(raw []byte, out any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode(out)
 }

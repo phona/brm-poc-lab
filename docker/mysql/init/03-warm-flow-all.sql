@@ -31,6 +31,7 @@ CREATE TABLE `flow_node`
     `node_ratio`      DECIMAL(6,3) DEFAULT NULL COMMENT '流程签署比例值',
     `coordinate`      varchar(100) DEFAULT NULL COMMENT '坐标',
     `skip_any_node`   varchar(100) DEFAULT 'N' COMMENT '是否可以退回任意节点（Y是 N否）',
+    `any_node_skip`   varchar(200) DEFAULT NULL COMMENT '可退回的节点列表 (Warm-Flow 1.3.8 新增)',
     `listener_type`   varchar(100) DEFAULT NULL COMMENT '监听器类型',
     `listener_path`   varchar(400) DEFAULT NULL COMMENT '监听器路径',
     `handler_type`    varchar(100)  DEFAULT NULL COMMENT '处理器类型',
