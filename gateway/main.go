@@ -44,13 +44,23 @@ func main() {
 	if wfBase == "" {
 		wfBase = "http://warm-flow:8081"
 	}
+	jwtSecret := os.Getenv("TTPOS_JWT_SECRET")
+	if jwtSecret == "" {
+		// Matches main/tests/test.env in ttpos-server-go.
+		jwtSecret = "test-secret-key-for-integration-tests"
+	}
+	ttposDsnFmt := os.Getenv("TTPOS_DSN_FMT")
+	if ttposDsnFmt == "" {
+		ttposDsnFmt = "root:pocroot@tcp(mysql:3306)/shop%d?charset=utf8mb4&parseTime=True&loc=Local"
+	}
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
 	wf := newWFClient(wfBase)
-	srv := NewServer(db, wf, apiKey)
+	ttposDB := newTtposDBManager(ttposDsnFmt)
+	srv := NewServer(db, wf, apiKey, jwtSecret, ttposDB)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()

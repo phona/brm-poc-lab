@@ -48,6 +48,66 @@ public class FlowBootstrap implements ApplicationRunner {
         installMultiTest();
         installCountersignTest();
         installVoteTest();
+        installTtposIntegrationTest();
+    }
+
+    private void installTtposIntegrationTest() {
+        try {
+            if (!nodeService.getByFlowCode("ttpos_transfer_test").isEmpty()) {
+                log.info("flow ttpos_transfer_test already installed");
+                return;
+            }
+            FlowDefinition def = buildTtposIntegrationDefinition();
+            saveAndPublish(def, "ttpos_transfer_test");
+        } catch (Exception e) {
+            log.error("FlowBootstrap installTtposIntegrationTest failed", e);
+        }
+    }
+
+    /**
+     * Flow used to verify ttpos integration end-to-end.
+     * Approver node uses WebhookPermissionListener to call the gateway at runtime,
+     * which then calls ttpos RBAC (GetStaffsByAccessPath) scoped to companyUuid
+     * read from flow variables. The result is written back to permissionList so the
+     * engine enforces it for skip(PASS).
+     */
+    private FlowDefinition buildTtposIntegrationDefinition() {
+        FlowDefinition def = new FlowDefinition();
+        def.setFlowCode("ttpos_transfer_test");
+        def.setFlowName("PoC ttpos integration");
+        def.setVersion("1");
+        def.setIsPublish(0);
+
+        FlowNode start = new FlowNode();
+        start.setNodeCode("start");
+        start.setNodeName("开始");
+        start.setNodeType(NodeType.START.getKey());
+        start.setVersion("1");
+        start.setSkipList(List.of(skip("start", NodeType.START.getKey(), "ttpos_approve", NodeType.BETWEEN.getKey(), SkipType.PASS.getKey())));
+
+        FlowNode approve = new FlowNode();
+        approve.setNodeCode("ttpos_approve");
+        approve.setNodeName("ttpos RBAC 审批");
+        approve.setNodeType(NodeType.BETWEEN.getKey());
+        approve.setVersion("1");
+        // Engine sees WEBHOOK_RESOLVE: prefix and the assignment listener resolves it at runtime.
+        approve.setPermissionFlag("WEBHOOK_RESOLVE:ACCESS:transfer_order_approve");
+        approve.setListenerType("assignment");
+        approve.setListenerPath(WebhookPermissionListener.class.getName());
+        approve.setSkipList(List.of(skip("ttpos_approve", NodeType.BETWEEN.getKey(), "end", NodeType.END.getKey(), SkipType.PASS.getKey())));
+
+        FlowNode end = new FlowNode();
+        end.setNodeCode("end");
+        end.setNodeName("结束");
+        end.setNodeType(NodeType.END.getKey());
+        end.setVersion("1");
+
+        List<Node> nodes = new ArrayList<>();
+        nodes.add(start);
+        nodes.add(approve);
+        nodes.add(end);
+        def.setNodeList(nodes);
+        return def;
     }
 
     private void installTransferTest() {

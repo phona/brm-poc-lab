@@ -24,6 +24,8 @@ services:
       MYSQL_DSN: root:${MYSQL_PASSWORD:-pocroot}@tcp(mysql:3306)/ttpos_poc_biz?charset=utf8mb4&parseTime=True&loc=Local
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-poc-key}
       WARM_FLOW_BASE_URL: http://warm-flow:8081
+      TTPOS_JWT_SECRET: ${TTPOS_JWT_SECRET:-test-secret-key-for-integration-tests}
+      TTPOS_DSN_FMT: "root:${MYSQL_PASSWORD:-pocroot}@tcp(mysql:3306)/shop%d?charset=utf8mb4&parseTime=True&loc=Local"
       PORT: "8080"
     ports:
       - "8080:8080"

@@ -1,10 +1,11 @@
-FROM golang:1.22-alpine AS build
+FROM golang:1.23-alpine AS build
 WORKDIR /src
 ENV GOTOOLCHAIN=auto
 RUN apk add --no-cache git
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
+# Use tidy so we pull any newly-added deps (e.g. golang-jwt/jwt v5) without requiring
+# a precommitted go.sum. Safe for PoC; production builds should pin via committed go.sum.
+RUN go mod tidy
 RUN go run github.com/swaggo/swag/cmd/swag@v1.16.3 init -g main.go -o docs --parseInternal
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /gateway .
 

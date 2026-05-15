@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,17 +13,30 @@ import (
 
 // Server is the PoC BFF (biz DB + Warm-Flow HTTP client).
 type Server struct {
-	db     *gorm.DB
-	wf     *wfClient
-	apiKey string
+	db        *gorm.DB
+	wf        *wfClient
+	apiKey    string
+	jwtSecret string          // ttpos-compatible JWT secret (HS256)
+	ttposDB   *ttposDBManager // per-companyUuid shop{n} db handles
 }
 
-func NewServer(db *gorm.DB, wf *wfClient, apiKey string) *Server {
-	return &Server{db: db, wf: wf, apiKey: apiKey}
+func NewServer(db *gorm.DB, wf *wfClient, apiKey, jwtSecret string, ttposDB *ttposDBManager) *Server {
+	return &Server{db: db, wf: wf, apiKey: apiKey, jwtSecret: jwtSecret, ttposDB: ttposDB}
 }
 
 func (s *Server) Register(r *gin.Engine) {
 	r.GET("/health", s.Health)
+
+	// ttpos-integrated business surface: real JWT, real RBAC.
+	// Separate from the legacy /internal/poc/warm-flow surface so the PoC mock path keeps working.
+	ttpos := r.Group("/api/v1/ttpos")
+	ttpos.Use(s.requireTtposJWT)
+	ttpos.POST("/flow/start", s.PostTtposFlowStart)
+	ttpos.GET("/flow/todo", s.GetTtposFlowTodo)
+	ttpos.POST("/flow/approve", s.PostTtposFlowApprove)
+
+	// Dev helper: sign a token with our shared secret. Disabled in prod.
+	r.POST("/dev/gen-token", s.PostDevGenToken)
 
 	internal := r.Group("/internal/poc/warm-flow")
 	internal.Use(s.requireAPIKey)
@@ -83,6 +97,30 @@ func (s *Server) PostResolveApprover(c *gin.Context) {
 		failJSON(c, -1, "invalid json")
 		return
 	}
+
+	// ttpos integration path: roleCode "ACCESS:<access_path>" resolves via real ttpos RBAC.
+	// companyUuid is read from FlowParams.variable["companyUuid"] (set by the gateway when starting).
+	if strings.HasPrefix(req.RoleCode, "ACCESS:") {
+		accessPath := strings.TrimSpace(strings.TrimPrefix(req.RoleCode, "ACCESS:"))
+		companyUuidStr := req.Variables["companyUuid"]
+		companyUuid, _ := strconv.ParseUint(companyUuidStr, 10, 64)
+		if companyUuid == 0 {
+			failJSON(c, -1, "companyUuid missing from flow variables")
+			return
+		}
+		ids, err := s.ttposStaffsByAccessPath(companyUuid, accessPath)
+		if err != nil {
+			failJSON(c, -1, "ttpos resolve failed: "+err.Error())
+			return
+		}
+		strs := make([]string, 0, len(ids))
+		for _, u := range ids {
+			strs = append(strs, strconv.FormatUint(u, 10))
+		}
+		okJSON(c, resolveData{UserIDs: strs})
+		return
+	}
+
 	var order MockTransferOrder
 	if err := s.db.Where("order_no = ?", req.BusinessID).First(&order).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -548,4 +586,136 @@ func (s *Server) GetInstanceTasks(c *gin.Context) {
 		return
 	}
 	okJSON(c, raw)
+}
+
+// ========== ttpos-integrated business surface (JWT-protected) ==========
+
+type ttposStartReq struct {
+	BusinessID string         `json:"businessId"`
+	FlowCode   string         `json:"flowCode"`
+	Variable   map[string]any `json:"variable"`
+}
+
+// PostTtposFlowStart: handler = StaffUuid from JWT, companyUuid injected into variables
+// so the resolve-approver webhook can scope its RBAC lookup to the right tenant DB.
+func (s *Server) PostTtposFlowStart(c *gin.Context) {
+	var req ttposStartReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failJSON(c, -1, "invalid json")
+		return
+	}
+	if req.BusinessID == "" || req.FlowCode == "" {
+		failJSON(c, -1, "businessId, flowCode required")
+		return
+	}
+	companyUuid := ctxCompanyUuid(c)
+	staffUuid := ctxStaffUuid(c)
+
+	vars := map[string]any{}
+	for k, v := range req.Variable {
+		vars[k] = v
+	}
+	// Critical: stamp companyUuid into flow variables so dynamic-approver webhooks
+	// know which tenant DB to query when resolving ACCESS:<path>.
+	vars["companyUuid"] = u64ToStr(companyUuid)
+	vars["createBy"] = u64ToStr(staffUuid)
+
+	body := wfStartReq{
+		BusinessID: req.BusinessID,
+		FlowCode:   req.FlowCode,
+		Handler:    u64ToStr(staffUuid),
+		Variable:   vars,
+	}
+	var raw map[string]any
+	if err := s.wf.postJSON("/api/flow/start", body, &raw); err != nil {
+		failJSON(c, -1, err.Error())
+		return
+	}
+	okJSON(c, gin.H{
+		"engineResponse": raw,
+		"companyUuid":    companyUuid,
+		"staffUuid":      staffUuid,
+	})
+}
+
+// GetTtposFlowTodo lists Warm-Flow tasks assigned to the JWT staff. The handler the
+// engine matches against is the StaffUuid string; no body-side filtering required.
+func (s *Server) GetTtposFlowTodo(c *gin.Context) {
+	staffUuid := ctxStaffUuid(c)
+	var raw map[string]any
+	if err := s.wf.getJSON("/api/task/todo?handler="+u64ToStr(staffUuid), &raw); err != nil {
+		failJSON(c, -1, err.Error())
+		return
+	}
+	okJSON(c, raw)
+}
+
+type ttposApproveReq struct {
+	TaskID  int64  `json:"taskId"`
+	Message string `json:"message"`
+}
+
+// PostTtposFlowApprove proxies PASS to engine using the caller's StaffUuid as handler.
+// Engine will reject if StaffUuid is not in the task's permissionList — proving the
+// RBAC -> permissionFlag binding is honored end-to-end.
+func (s *Server) PostTtposFlowApprove(c *gin.Context) {
+	var req ttposApproveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failJSON(c, -1, "invalid json")
+		return
+	}
+	if req.TaskID == 0 {
+		failJSON(c, -1, "taskId required")
+		return
+	}
+	staffUuid := ctxStaffUuid(c)
+	body := wfSkipReq{
+		TaskID:  req.TaskID,
+		Handler: u64ToStr(staffUuid),
+		Message: req.Message,
+	}
+	var raw map[string]any
+	if err := s.wf.postJSON("/api/task/skip", body, &raw); err != nil {
+		failJSON(c, -1, err.Error())
+		return
+	}
+	okJSON(c, raw)
+}
+
+// ========== Dev token generator ==========
+
+type devGenTokenReq struct {
+	CompanyUuid uint64 `json:"companyUuid"`
+	StaffUuid   uint64 `json:"staffUuid"`
+	Source      string `json:"source"`
+	ExpireSec   int    `json:"expireSec"`
+}
+
+// PostDevGenToken signs a ttpos-shape JWT for PoC verification. Never deploy.
+func (s *Server) PostDevGenToken(c *gin.Context) {
+	var req devGenTokenReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		failJSON(c, -1, "invalid json")
+		return
+	}
+	if req.CompanyUuid == 0 || req.StaffUuid == 0 {
+		failJSON(c, -1, "companyUuid, staffUuid required")
+		return
+	}
+	if req.Source == "" {
+		req.Source = "shop"
+	}
+	if req.ExpireSec == 0 {
+		req.ExpireSec = 3600
+	}
+	tok, err := ttposGenerateToken(TtposClaims{
+		Source:      req.Source,
+		CompanyUuid: req.CompanyUuid,
+		StaffUuid:   req.StaffUuid,
+	}, s.jwtSecret, req.ExpireSec)
+	if err != nil {
+		failJSON(c, -1, err.Error())
+		return
+	}
+	okJSON(c, gin.H{"token": tok})
 }
