@@ -20,6 +20,7 @@
         <java.version>17</java.version>
         <flowlong.version>1.2.4</flowlong.version>
         <mybatis-plus.version>3.5.14</mybatis-plus.version>
+        <logstash-encoder.version>7.4</logstash-encoder.version>
     </properties>
 
     <dependencies>
@@ -44,6 +45,21 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <!-- 可观测性：结构化日志 + Prometheus 指标 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-encoder.version}</version>
         </dependency>
     </dependencies>
 

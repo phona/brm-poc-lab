@@ -3,6 +3,9 @@ package com.ttpos.flpoc.web;
 import com.aizuda.bpm.engine.FlowLongEngine;
 import com.aizuda.bpm.engine.core.FlowCreator;
 import com.aizuda.bpm.engine.entity.FlwInstance;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,10 +18,12 @@ public class FlowController {
 
     private final FlowLongEngine engine;
     private final JdbcTemplate jdbc;
+    private final MeterRegistry meterRegistry;
 
-    public FlowController(FlowLongEngine engine, JdbcTemplate jdbc) {
+    public FlowController(FlowLongEngine engine, JdbcTemplate jdbc, MeterRegistry meterRegistry) {
         this.engine = engine;
         this.jdbc = jdbc;
+        this.meterRegistry = meterRegistry;
     }
 
     @GetMapping("/health")
@@ -27,17 +32,28 @@ public class FlowController {
     /** body: {"userId":"10011","userName":"Alice","companyUuid":1001,"businessId":"FL-T1"} */
     @PostMapping("/flow/start")
     public Map<String, Object> start(@RequestBody Map<String, Object> body) {
-        FlowCreator creator = FlowCreator.of(
-                String.valueOf(body.getOrDefault("userId", "u1")),
-                String.valueOf(body.getOrDefault("userName", "anon")));
-        Map<String, Object> args = new HashMap<>(body);
-        FlwInstance inst = engine.startInstanceByProcessKey("ttpos_transfer_test", null, creator, args)
-                .orElseThrow(() -> new IllegalStateException("start returned empty"));
-        Map<String, Object> out = new HashMap<>();
-        out.put("instanceId", String.valueOf(inst.getId()));
-        out.put("currentNodeKey", inst.getCurrentNodeKey());
-        out.put("currentNodeName", inst.getCurrentNodeName());
-        return out;
+        String tenant = String.valueOf(body.getOrDefault("companyUuid", "unknown"));
+        Timer.Sample sample = Timer.start(meterRegistry);
+        String outcome = "success";
+        try {
+            FlowCreator creator = FlowCreator.of(
+                    String.valueOf(body.getOrDefault("userId", "u1")),
+                    String.valueOf(body.getOrDefault("userName", "anon")));
+            Map<String, Object> args = new HashMap<>(body);
+            FlwInstance inst = engine.startInstanceByProcessKey("ttpos_transfer_test", null, creator, args)
+                    .orElseThrow(() -> new IllegalStateException("start returned empty"));
+            Map<String, Object> out = new HashMap<>();
+            out.put("instanceId", String.valueOf(inst.getId()));
+            out.put("currentNodeKey", inst.getCurrentNodeKey());
+            out.put("currentNodeName", inst.getCurrentNodeName());
+            return out;
+        } catch (RuntimeException e) {
+            outcome = "error";
+            throw e;
+        } finally {
+            sample.stop(meterRegistry.timer("flow_start_duration_seconds", Tags.of("tenant", tenant, "outcome", outcome)));
+            meterRegistry.counter("flow_start_total", "tenant", tenant, "outcome", outcome).increment();
+        }
     }
 
     /** Approve current task on behalf of caller. */
@@ -45,10 +61,19 @@ public class FlowController {
     public Map<String, Object> skip(@RequestParam Long taskId,
                                     @RequestParam String userId,
                                     @RequestParam(defaultValue = "approver") String userName) {
-        boolean ok = engine.executeTask(taskId,
-                FlowCreator.of(userId, userName),
-                new HashMap<>());
-        return Map.of("success", ok);
+        String outcome = "success";
+        try {
+            boolean ok = engine.executeTask(taskId,
+                    FlowCreator.of(userId, userName),
+                    new HashMap<>());
+            if (!ok) outcome = "rejected";
+            return Map.of("success", ok);
+        } catch (RuntimeException e) {
+            outcome = "error";
+            throw e;
+        } finally {
+            meterRegistry.counter("task_skip_total", "outcome", outcome).increment();
+        }
     }
 
     @GetMapping("/instance/actors")

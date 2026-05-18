@@ -32,6 +32,21 @@ data:
     mybatis-plus:
       configuration:
         map-underscore-to-camel-case: true
-    # 注：探针走 FlowController.health()（GET /health），不依赖 actuator。
-    # 如未来要 Prometheus metrics，加 spring-boot-starter-actuator + micrometer-registry-prometheus
-    # 并放开 management.endpoints.web.exposure.include 即可
+    # 可观测性：暴露 /actuator/health 和 /actuator/prometheus
+    # health 给 K8s 探针，prometheus 给 GCP Managed Prometheus / 自建 Prom 抓取
+    # 其它 actuator endpoint 不暴露（最小化攻击面）
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,prometheus
+          base-path: /actuator
+      endpoint:
+        health:
+          probes:
+            enabled: true
+          show-details: never
+      metrics:
+        tags:
+          service: flowlong-app
+          env: {{ .Values.deployEnv | default "prod" }}

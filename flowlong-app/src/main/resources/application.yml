@@ -18,3 +18,23 @@ flowlong:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+
+# 可观测性：暴露 /actuator/health 和 /actuator/prometheus
+# - health 给容器探针 + 部署侧探活
+# - prometheus 给 GCP Managed Prometheus / 自建 Prom scrape
+# 其它 actuator endpoint 默认不暴露（attack surface 最小化）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      service: flowlong-app
+      env: ${DEPLOY_ENV:dev}

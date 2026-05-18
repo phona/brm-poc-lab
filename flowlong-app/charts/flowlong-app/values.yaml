@@ -66,6 +66,17 @@ resources:
 jvm:
   opts: "-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
 
+# 部署环境标签，注入到日志/指标的 env 字段（dev/staging/prod/customer-x）
+deployEnv: prod
+
+# Prometheus 抓取（可选）：开了之后 Prometheus Operator / GCP Managed Prom 自动发现
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /actuator/prometheus
+  labels: {}
+
 autoscaling:
   enabled: false
   minReplicas: 2

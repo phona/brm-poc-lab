@@ -62,6 +62,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "flowlong-app.dbSecretName" . }}
                   key: password
+            - name: DEPLOY_ENV
+              value: {{ .Values.deployEnv | default "prod" | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

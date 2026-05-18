@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="false">
+    <!--
+      生产/默认：JSON 一行一条到 stdout。
+        - GCP Ops Agent / Loki / ELK / Fluent Bit 都能直接吃
+        - 自动带 @timestamp / level / thread / logger / message / stack_trace 标准字段
+        - customFields 加固定标签 service=flowlong-app
+      本地开发：用 -Dspring.profiles.active=local 切到人类可读格式
+    -->
+
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"flowlong-app"}</customFields>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+            <includeMdcKeyName>companyUuid</includeMdcKeyName>
+            <includeMdcKeyName>instanceId</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <appender name="PLAIN" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <springProfile name="local">
+        <root level="INFO">
+            <appender-ref ref="PLAIN"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!local">
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+    <!-- FlowLong 引擎日志降级（启动时 banner 打太多） -->
+    <logger name="org.apache.ibatis" level="WARN"/>
+    <logger name="com.baomidou.mybatisplus" level="WARN"/>
+</configuration>
