@@ -1,0 +1,18 @@
+{
+  "key": "ttpos_transfer_test",
+  "name": "PoC ttpos integration (FlowLong)",
+  "type": "AUDIT",
+  "nodeConfig": {
+    "nodeName": "发起人",
+    "nodeKey": "start",
+    "type": 0,
+    "childNode": {
+      "nodeName": "RBAC 审批 (会签)",
+      "nodeKey": "approve",
+      "type": 1,
+      "setType": 4,
+      "examineMode": 2,
+      "nodeAssigneeList": []
+    }
+  }
+}
