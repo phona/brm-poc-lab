@@ -6,13 +6,33 @@
     "nodeName": "发起人",
     "nodeKey": "start",
     "type": 0,
+    "nodeAssigneeList": [],
     "childNode": {
       "nodeName": "RBAC 审批 (会签)",
       "nodeKey": "approve",
       "type": 1,
       "setType": 4,
       "examineMode": 2,
-      "nodeAssigneeList": []
+      "examineLevel": 1,
+      "directorLevel": 1,
+      "directorMode": 0,
+      "selectMode": 1,
+      "termAuto": false,
+      "term": 0,
+      "termMode": 0,
+      "typeOfApprove": 1,
+      "approveSelf": 0,
+      "allowTransfer": false,
+      "allowAppendNode": false,
+      "allowRollback": false,
+      "nodeAssigneeList": [
+        { "id": "placeholder", "name": "由 TaskActorProvider 动态解析" }
+      ],
+      "childNode": {
+        "nodeName": "结束",
+        "nodeKey": "end",
+        "type": -1
+      }
     }
   }
 }

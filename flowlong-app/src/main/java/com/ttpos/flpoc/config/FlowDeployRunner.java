@@ -18,8 +18,9 @@ public class FlowDeployRunner {
     public ApplicationRunner deploy(FlowLongEngine engine) {
         return args -> {
             try {
+                // repeat=true so model changes during PoC iteration get re-published as a new version
                 Long id = engine.processService()
-                        .deployByResource("process-ttpos.json", SYSTEM, false);
+                        .deployByResource("process-ttpos.json", SYSTEM, true);
                 log.info("[FlowLong] deployed ttpos_transfer_test processId={}", id);
             } catch (Exception e) {
                 log.error("[FlowLong] deploy failed", e);
