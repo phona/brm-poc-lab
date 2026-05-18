@@ -22,10 +22,14 @@ curl -sf "$FL/health" >/dev/null || { ng "flowlong not up"; exit 1; }
 ok "flowlong healthy"
 
 # Assertion 1: start instance for company 1001
+# 架构原则：caller (ttpos main / curl) 负责把审批人列表算出来传过来，
+# Java 引擎对 ttpos 业务零认知。这里 PoC 模拟 caller 直接 hard-code list；
+# 生产里 ttpos main 用 GetStaffsByAccessPath 算后填进 approverIds。
 info "Assertion 1: start instance (company 1001, Alice as creator)"
 start1=$(curl -s -X POST "$FL/flow/start" \
   -H "Content-Type: application/json" \
-  -d '{"userId":"10011","userName":"Alice","companyUuid":1001,"businessId":"FL-1001-A"}')
+  -d '{"userId":"10011","userName":"Alice","companyUuid":1001,"businessId":"FL-1001-A",
+       "approverIds":["10011","10012"]}')
 echo "$start1"
 inst1=$(echo "$start1" | grep -oE '"instanceId":"[0-9]+"' | head -1 | grep -oE '[0-9]+')
 [ -n "$inst1" ] && ok "instance1 = $inst1" || { ng "start1 failed"; exit 1; }
@@ -42,10 +46,12 @@ echo "$actors1" | grep -qx "10012" && ok "Bob/superadmin (10012) is one of the a
 echo "$actors1" | grep -qx "10013" && ng "Eve (10013) leaked in" || ok "Eve correctly excluded"
 
 # Assertion 3: cross-tenant
-info "Assertion 3: 多租户隔离"
+# caller 为 company 1002 解析出的人是不同的 list，引擎据此创建 actor 即可
+info "Assertion 3: 多租户隔离（caller 传不同 list = 不同 actor 集）"
 start2=$(curl -s -X POST "$FL/flow/start" \
   -H "Content-Type: application/json" \
-  -d '{"userId":"10021","userName":"Carol","companyUuid":1002,"businessId":"FL-1002-B"}')
+  -d '{"userId":"10021","userName":"Carol","companyUuid":1002,"businessId":"FL-1002-B",
+       "approverIds":["10021","10022"]}')
 inst2=$(echo "$start2" | grep -oE '"instanceId":"[0-9]+"' | head -1 | grep -oE '[0-9]+')
 [ -n "$inst2" ] && ok "instance2 = $inst2" || { ng "start2 failed"; exit 1; }
 

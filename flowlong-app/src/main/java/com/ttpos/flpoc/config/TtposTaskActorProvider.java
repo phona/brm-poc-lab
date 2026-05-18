@@ -6,81 +6,103 @@ import com.aizuda.bpm.engine.entity.FlwTaskActor;
 import com.aizuda.bpm.engine.model.NodeModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 模拟 ttpos 的 GetStaffsByAccessPath 解析：
- *   根据 instance 启动时传入的 companyUuid，去 shop{companyUuid} 库查 RBAC 表，
- *   返回持有 transfer_order_approve 权限的 staff_uuid 列表（含超管 union）。
+ * 生产架构原则：Java 引擎对 ttpos 业务零认知。
  *
- * 复用 PoC seed 的 shop1001 / shop1002 库（warm-flow 那边已经建好）。
+ * 审批人解析由 caller（ttpos main，Go）在启动流程前完成：
+ *   - Go 调 ttpos 自己的 GetStaffsByAccessPath(companyUuid, accessPath) 算出 staff 列表
+ *   - 作为 FlowParams.variable["approverIds"] 传过来
+ *   - 这里只负责把它转成 FlwTaskActor 列表
+ *
+ * 不做：
+ *   - 不连 ttpos shop{n} DB
+ *   - 不调 ttpos main HTTP API（如果未来有需要再考虑，但每节点创建都打 HTTP 是延迟+故障耦合）
+ *   - 不理解 access path / role / company 等业务概念
+ *
+ * variable 约定（caller 必须提供其一）：
+ *   - approverIds: List<String>  →  推荐
+ *   - approverIds: String        →  逗号分隔，兼容简单 client
+ *   - approvers: List<Map<id,name>>  →  带显示名，方便审计可读
  */
 @Component
 public class TtposTaskActorProvider implements TaskActorProvider {
 
     private static final Logger log = LoggerFactory.getLogger(TtposTaskActorProvider.class);
 
-    private final JdbcTemplate jdbc;
-
-    public TtposTaskActorProvider(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
-
     @Override
     public List<FlwTaskActor> getTaskActors(NodeModel nodeModel, Execution execution) {
         Map<String, Object> vars = execution.getArgs();
-        Object cu = vars == null ? null : vars.get("companyUuid");
-        if (cu == null) {
-            log.warn("companyUuid missing from flow args; returning empty actor list");
+        if (vars == null || vars.isEmpty()) {
+            log.warn("getTaskActors: no flow args; returning empty actor list");
             return new ArrayList<>();
         }
-        long companyUuid = Long.parseLong(cu.toString());
 
-        // accessPath -> uuid, role_access -> role_uuids, staff_role -> staff_uuids ∪ is_super=1
-        String accessSql = "SELECT uuid FROM shop" + companyUuid + ".ttpos_access WHERE path=? AND delete_time=0";
-        List<Long> accessIds = jdbc.queryForList(accessSql, Long.class, "transfer_order_approve");
-
-        Map<Long, String> staffs = new HashMap<>();
-        if (!accessIds.isEmpty()) {
-            String roleSql = "SELECT role_uuid FROM shop" + companyUuid +
-                    ".ttpos_role_access WHERE access_uuid IN (" +
-                    accessIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("0") +
-                    ") AND delete_time=0";
-            List<Long> roleIds = jdbc.queryForList(roleSql, Long.class);
-            if (!roleIds.isEmpty()) {
-                String sql = "SELECT s.uuid,s.real_name FROM shop" + companyUuid + ".ttpos_staff s " +
-                        "JOIN shop" + companyUuid + ".ttpos_staff_role sr ON sr.staff_uuid=s.uuid " +
-                        "WHERE sr.role_uuid IN (" +
-                        roleIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("0") +
-                        ") AND s.delete_time=0 AND sr.delete_time=0";
-                jdbc.query(sql, rs -> {
-                    staffs.put(rs.getLong("uuid"), rs.getString("real_name"));
-                });
+        // 优先：approvers (含显示名)
+        Object structured = vars.get("approvers");
+        if (structured instanceof List<?> list && !list.isEmpty()) {
+            List<FlwTaskActor> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> m) {
+                    String id = String.valueOf(m.get("id"));
+                    String name = m.get("name") == null ? "" : String.valueOf(m.get("name"));
+                    if (!id.isBlank() && !"null".equals(id)) {
+                        out.add(FlwTaskActor.ofUser(null, id, name));
+                    }
+                }
+            }
+            if (!out.isEmpty()) {
+                log.info("getTaskActors: resolved {} actors from 'approvers' variable", out.size());
+                return out;
             }
         }
-        // is_super=1 union
-        String superSql = "SELECT uuid,real_name FROM shop" + companyUuid +
-                ".ttpos_staff WHERE is_super=1 AND is_disable=0 AND delete_time=0";
-        jdbc.query(superSql, rs -> {
-            staffs.put(rs.getLong("uuid"), rs.getString("real_name"));
-        });
 
-        List<FlwTaskActor> out = new ArrayList<>();
-        for (Map.Entry<Long, String> e : staffs.entrySet()) {
-            out.add(FlwTaskActor.ofUser(null, String.valueOf(e.getKey()), e.getValue()));
+        // 兼容：approverIds (单字符串或字符串列表)
+        Object ids = vars.get("approverIds");
+        List<String> idList = parseIds(ids);
+        if (idList.isEmpty()) {
+            log.warn("getTaskActors: 'approverIds' / 'approvers' empty or missing; returning empty actor list");
+            return new ArrayList<>();
         }
-        log.info("ttpos RBAC resolved company={} -> {} actors {}", companyUuid, out.size(), staffs.keySet());
+        // 去重保持顺序
+        Map<String, Boolean> seen = new LinkedHashMap<>();
+        for (String id : idList) {
+            if (!id.isBlank()) seen.putIfAbsent(id, true);
+        }
+        List<FlwTaskActor> out = new ArrayList<>(seen.size());
+        for (String id : seen.keySet()) {
+            out.add(FlwTaskActor.ofUser(null, id, ""));
+        }
+        log.info("getTaskActors: resolved {} actors from 'approverIds' variable", out.size());
         return out;
     }
 
     @Override
     public Integer getActorType(NodeModel nodeModel) {
         return 0; // user
+    }
+
+    private List<String> parseIds(Object raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        if (raw instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null) out.add(String.valueOf(o));
+            }
+            return out;
+        }
+        String s = String.valueOf(raw).trim();
+        if (s.isEmpty()) return out;
+        for (String part : s.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
     }
 }
