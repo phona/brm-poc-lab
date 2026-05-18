@@ -1,0 +1,131 @@
+# Default values for flowlong-app.
+# 生产推荐：2 副本起，外置 MySQL（云托管/独立维护），不要在 K8s 里跑数据库。
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/phona/flowlong-app
+  pullPolicy: IfNotPresent
+  # Overrides Chart.appVersion (defaults to "1.2.4" -> "0.1.0" by appVersion)
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false  # Spring Boot 要写 /tmp，简化起见关闭
+
+service:
+  type: ClusterIP
+  port: 8082
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/proxy-body-size: 2m
+  hosts:
+    - host: flowlong.internal.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: flowlong-tls
+    #   hosts:
+    #     - flowlong.internal.example.com
+
+# 资源限制：PoC 实测稳态 ~400 MiB，1G 容器 + Xmx512m 充裕。
+# 万店级峰值审批 QPS 个位数到两位数，2 副本 1G 配置远超需求。
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 512Mi
+
+# JVM 参数：与 PoC 一致，G1GC + 50% 容器内存上限。
+jvm:
+  opts: "-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity:
+  # 默认开启 pod 反亲和，副本散到不同节点
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: flowlong-app
+          topologyKey: kubernetes.io/hostname
+
+# === FlowLong / 外置依赖配置 ===
+# MySQL 由 ttpos 运维提供（云 RDS 或独立 MySQL 集群），chart 不内置数据库。
+mysql:
+  # 用 envFrom + existingSecret，避免明文密码写到 values
+  host: mysql.default.svc.cluster.local
+  port: 3306
+  database: flowlong
+  username: flowlong
+  # 推荐用 existingSecret 注入密码，避免 chart values 明文
+  existingSecret: ""        # 例如 "flowlong-db"，里面要有 key: password
+  password: ""              # 仅 existingSecret 为空时生效（不推荐生产用）
+
+# Spring Boot 额外环境变量（透传到容器）
+extraEnv: []
+  # - name: SPRING_PROFILES_ACTIVE
+  #   value: production
+
+# 探针（/health 是 FlowController 暴露的轻量端点）
+probes:
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30  # 30 * 5s = 150s 启动窗口（Spring Boot 冷启 + maven deps cache miss 时够用）
+
+# 优雅停机，让 Spring Boot 处理完在飞请求再退出
+terminationGracePeriodSeconds: 30

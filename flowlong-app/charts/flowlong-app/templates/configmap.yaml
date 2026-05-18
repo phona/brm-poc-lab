@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "flowlong-app.fullname" . }}-config
+  labels:
+    {{- include "flowlong-app.labels" . | nindent 4 }}
+data:
+  application.yml: |
+    server:
+      port: 8082
+      shutdown: graceful
+    spring:
+      application:
+        name: flowlong-poc
+      lifecycle:
+        timeout-per-shutdown-phase: 25s
+      datasource:
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        url: jdbc:mysql://{{ .Values.mysql.host }}:{{ .Values.mysql.port }}/{{ .Values.mysql.database }}?characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+        username: {{ .Values.mysql.username }}
+        # password 由 env MYSQL_PASSWORD 注入（见 deployment.yaml），不写进 ConfigMap
+        hikari:
+          maximum-pool-size: 20
+          minimum-idle: 5
+          connection-timeout: 30000
+          idle-timeout: 600000
+          max-lifetime: 1800000
+    flowlong:
+      banner: true
+      eventing:
+        task: false
+    mybatis-plus:
+      configuration:
+        map-underscore-to-camel-case: true
+    # 注：探针走 FlowController.health()（GET /health），不依赖 actuator。
+    # 如未来要 Prometheus metrics，加 spring-boot-starter-actuator + micrometer-registry-prometheus
+    # 并放开 management.endpoints.web.exposure.include 即可

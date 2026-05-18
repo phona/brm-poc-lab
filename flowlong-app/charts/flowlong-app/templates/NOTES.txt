@@ -1,0 +1,28 @@
+flowlong-app 已部署到命名空间 {{ .Release.Namespace }}（release: {{ .Release.Name }}）。
+
+1. 看 Pod 状态：
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+2. 看启动日志（等到 "Started FlowLongPocApplication" 才算就绪）：
+   kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -f --tail=200
+
+3. 集群内访问（同 namespace 的服务，比如 ttpos main）：
+   http://{{ include "flowlong-app.fullname" . }}:{{ .Values.service.port }}
+
+{{- if .Values.ingress.enabled }}
+
+4. 外部 Ingress 访问：
+{{- range .Values.ingress.hosts }}
+   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+
+4. 本地端口转发测试：
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "flowlong-app.fullname" . }} 8082:{{ .Values.service.port }}
+   curl http://localhost:8082/health
+{{- end }}
+
+⚠️  生产前确认：
+   - MySQL 用 existingSecret（当前: {{ default "（自动创建，仅开发用）" .Values.mysql.existingSecret }}）
+   - autoscaling 是否需开启（当前: {{ .Values.autoscaling.enabled }}）
+   - 资源 limits / requests 与实际负载是否匹配（默认对万店级审批 QPS 充裕）

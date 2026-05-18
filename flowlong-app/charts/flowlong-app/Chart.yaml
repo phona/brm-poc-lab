@@ -1,0 +1,17 @@
+apiVersion: v2
+name: flowlong-app
+description: ttpos 审批引擎 — FlowLong 1.2.4 嵌入 Spring Boot 3 后端服务
+type: application
+version: 0.1.0
+appVersion: "1.2.4"
+keywords:
+  - bpm
+  - workflow
+  - approval
+  - flowlong
+home: https://github.com/phona/brm-poc-lab
+sources:
+  - https://github.com/phona/brm-poc-lab
+maintainers:
+  - name: weifashi
+    email: admin@jbcnet.co.jp
