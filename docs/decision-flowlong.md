@@ -20,14 +20,61 @@ ttpos 需要一套支撑业务单据审批的工作流能力，覆盖：
 
 ## 三、候选与淘汰理由
 
-| 候选 | 类型 | 淘汰 / 选中 | 理由 |
+### 3.1 速判表
+
+| 候选 | 类型 | 淘汰 / 选中 | 理由（一句话） |
 |---|---|---|---|
 | **easy-flow / task-flow** | BPM | ❌ | 停更 2+ 年，无人响应 issue |
+| **Snakerflow** | 轻量 BPM | ❌ | 国产老引擎，停更 10 年+，无 SB3 适配 |
 | **Temporal** | workflow-as-code | ❌ | 错频道——没有"人工任务/待办"概念，做审批等于自己造 BPM |
 | **LiteFlow** | 规则编排 | ❌ | 错频道——是给开发者编排代码用的，跟审批不是同一类 |
-| **Camunda / Flowable** | 企业 BPM | ❌ | 太重，外文社区，运维复杂度不匹配业务规模 |
-| **Warm-Flow 1.3.8** | BPM | 备胎 | PoC 已验 14/14，但有动态多审批人 quirk |
-| **FlowLong 1.2.4** | BPM | ✅ **采用** | 见下节 |
+| **Camunda 7 CE** | 企业 BPM | ❌ | **2025-10-14 官方宣布 CE 版 EOL**；BPMN 思维不贴中国式审批 |
+| **Camunda 8 / Zeebe** | 云原生 BPM | ❌ | License 改为 Camunda License v1.0（非 OSI），自营 SaaS 商用受限 |
+| **Flowable 7** | 企业 BPM | ❌ | 60+ 张表过重；中国式审批要二开；高级功能商业 gating |
+| **Activiti 7/8** | 企业 BPM | ❌ | 社区下滑明显，已被 Flowable 取代 |
+| **Bonita BPM** | 法系 BPM | ❌ | GPL v2 + 商业双 License；国内零社区 |
+| **JeecgBoot / RuoYi-Flowable** | 低代码全家桶 | ❌ | 侵入性太强，捆绑整套后台脚手架 |
+| **Warm-Flow 1.3.8** | 国产轻量 BPM | 备胎 | PoC 已验 14/14，但有动态多审批人 quirk |
+| **FlowLong 1.2.4** | 国产轻量 BPM | ✅ **采用** | 见下节 |
+
+### 3.2 企业 BPM 三巨头详细盘点
+
+针对 Camunda / Flowable / Activiti（一开始最容易被列为"行业标准"的候选），按维度细看：
+
+| 维度 | Camunda 7.22+ CE | Flowable 7 | Activiti 7/8 |
+|---|---|---|---|
+| 表数量 | ~48 张 `ACT_*`+`CAM_*` | **60+ 张**（含 BPMN/CMMN/DMN/Form/Content/IDM） | ~40 张；Cloud 版加 Keycloak/RabbitMQ/ES |
+| 部署 | 嵌入式 / Run 独立 / 集群 | 嵌入式 JAR / Flowable UI App | Core 嵌入；**Cloud 必须 K8s 多 Pod** |
+| 空载内存 | 350–500 MB 嵌入 / 700M-1G 独立 | 300–450 MB 嵌入 / 生产 500+ | Core 同 Flowable；**Cloud 全家桶 4–6 GB 起** |
+| License | Apache 2.0 但 **CE 2025-10 EOL**，仅 EE 续到 2030 | Apache 2.0；高级 Form/Case/Audit 商业 gating | Apache 2.0；个人主导，提交量下滑 |
+| 中文社区 | 老文章多，EOL 后基本断流 | **国内最活跃**，RuoYi-Flowable 衍生项目多 | 7/8 中文资料稀缺 |
+| Designer | Camunda Modeler 桌面免费，Cockpit EE 强 | Modeler CE 包含但 UI 老旧，多用三方 | **官方 Modeler 停止维护** |
+| 中国式审批适配 | **差**（BPMN 西方思维，加签/退回/转办都要二开） | **较差**（同上，社区有补丁但不够开箱） | **差** + 无中国化生态 |
+| 多租户 | 内置 tenant_id 列 | 内置 tenant_id 列 | Core 内置；Cloud 走 Keycloak realm，复杂 |
+| SB3 / Java 17 | 7.22+ 支持，**但 EOL 一年后无人维护** | 7.0 起以 JDK 17 + SB 3 为基线，**最干净** | 8.x 才官方支持 SB 3 |
+
+### 3.3 为什么三巨头都不选
+
+**Camunda 7 CE**：硬伤是 **2025-10-14 EOL**（[官方公告](https://forum.camunda.io/t/important-update-camunda-7-community-edition-end-of-life-announced/50921)）。选了就要 2026 年立刻规划迁 Camunda 8（完全不同架构）或转 CIB seven 社区分叉。新项目压上去 = 主动给自己挖坑。
+
+**Flowable 7**：技术上最稳的"国际派"。但 ① 60+ 张表对 5–20 单/店的轻量审批是工程过载；② 中国式审批（加签/退回/抄送）要自行二开，开发量等同重写一个轻引擎；③ 高级 Form/Case/Audit 被商业版 gating。**对万店 SaaS 自营场景过重**。
+
+**Activiti 7/8**：社区下滑明显（Salaboy 个人主导）、Cloud 版组件过多、中国化生态弱于 Flowable。**没有任何选它而不选 Flowable 的理由**。
+
+### 3.4 选 FlowLong 的核心命中点
+
+ttpos 场景的真实约束：**单店审批量极轻（5–20/天）× 店铺数极重（万店级）× 中国式审批形态（钉钉/飞书风）× 自营 SaaS 商业可控 × 团队 Java 经验有限**。
+
+FlowLong 在这五个维度同时命中：
+1. ✅ **中国式审批开箱即用**——examineMode/setType 直接对应"会签/票签/或签/指定人/上级"等钉钉概念
+2. ✅ **JSON 模型轻量**（8 张表）——对比 Camunda/Flowable 30–60+ 张表，运维心智成本低一个数量级
+3. ✅ **Apache 2.0 自营商用无忧**（不做 OEM 不触发 AGPL）
+4. ✅ **SB3 / JDK17 原生**——零适配
+5. ✅ **仿钉钉/飞书设计器免费**——业务/产品自助改流程的入口
+
+Camunda/Flowable/Activiti 三巨头分别在"未来生命周期"、"工程过载"、"社区/中国化适配"三个不同维度卡住。其它候选（Snakerflow/Bonita/Jeecg）在 License、维护性、侵入性上各有硬伤。
+
+**FlowLong 是当前唯一同时满足这五条的现成方案，与 PoC 实测一致。**
 
 ## 四、为什么选 FlowLong
 
