@@ -3,6 +3,7 @@ package com.ttpos.flpoc.config;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
+import org.springframework.aot.hint.TypeReference;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ImportRuntimeHints;
 
@@ -67,7 +68,8 @@ public class NativeHintsConfig {
                 hints.reflection().registerTypeIfPresent(classLoader, cls,
                         MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
                         MemberCategory.INVOKE_DECLARED_METHODS);
-                hints.proxies().registerJdkProxy(builder -> builder.proxiedInterfaces(cls));
+                // JDK proxy 需要 TypeReference（String -> TypeReference 工厂方法）
+                hints.proxies().registerJdkProxy(TypeReference.of(cls));
             }
 
             // resources：process JSON 文件（classpath:flows/*.json，flowlong 启动时读）
