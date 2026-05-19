@@ -6,12 +6,20 @@
 #   mvn -Pnative -DskipTests package      # 需要本机已装 GraalVM 17
 #   docker build -f Dockerfile.native -t flowlong-app:native .
 
-# distroless/cc：自带 glibc + libz + libstdc++（base-debian12 缺 libz，native binary 跑不起来）
-FROM gcr.io/distroless/cc-debian12:nonroot
+# debian:12-slim：~80MB，含 libz + libc + libstdc++ 等完整运行时
+# (distroless/cc-debian12 验证发现不含 libz，native binary 启动报 cannot open libz.so.1)
+FROM debian:12-slim
+
+# 只装 binary 必需的，去 apt 缓存
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    zlib1g ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r app && useradd -r -g app -u 10001 app
 
 WORKDIR /app
 COPY target/flowlong-app /app/flowlong-app
+RUN chmod +x /app/flowlong-app
 
 EXPOSE 8082
-USER nonroot:nonroot
+USER app:app
 ENTRYPOINT ["/app/flowlong-app"]
