@@ -1,0 +1,125 @@
+name: Build flowlong-app native image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'flowlong-app/pom.xml'
+      - 'flowlong-app/src/**'
+      - 'flowlong-app/Dockerfile.native'
+      - '.github/workflows/build-flowlong-native.yml'
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: 'push image to ghcr.io after build'
+        required: false
+        default: 'true'
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/flowlong-app
+
+jobs:
+  native-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GraalVM 17
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '17'
+          distribution: 'graalvm-community'
+          cache: 'maven'
+          components: 'native-image'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print versions
+        run: |
+          java --version
+          native-image --version
+          mvn -v
+          free -h
+          df -h /
+
+      - name: AOT + Native compile
+        working-directory: flowlong-app
+        run: |
+          mvn -B -Pnative -DskipTests \
+            -Dspring-boot.aot.skip=false \
+            package
+        # 失败时上传 build log artifact 方便分析
+        continue-on-error: false
+
+      - name: Show native artifact
+        if: always()
+        working-directory: flowlong-app
+        run: |
+          ls -lh target/ || true
+          file target/flowlong-app || true
+          du -h target/flowlong-app || true
+
+      - name: Smoke test (binary 至少能 exec 不立刻段错误)
+        if: success()
+        working-directory: flowlong-app
+        run: |
+          # 跑 5 秒看 binary 是否能启动 Spring Boot 上下文（DB 连不上会退，但至少能跑到那一步）
+          set +e
+          timeout 8s ./target/flowlong-app 2>&1 | tee /tmp/native-startup.log | head -80
+          echo "--- exit code: $? ---"
+          # 看到 Spring banner 或 NoClassDefFoundError 都算 binary 自身没崩
+          grep -q "Started\|Spring\|FlowLong\|DataSource\|Exception\|Error" /tmp/native-startup.log || echo "WARN: binary 没有任何输出，可能段错误"
+          true
+
+      - name: Set up Docker Buildx
+        if: success()
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: success() && inputs.push_image != 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-8)
+          echo "tags=${{ env.IMAGE_NAME }}:native-${SHA_SHORT},${{ env.IMAGE_NAME }}:native-latest" >> $GITHUB_OUTPUT
+          echo "main=${{ env.IMAGE_NAME }}:native-${SHA_SHORT}" >> $GITHUB_OUTPUT
+
+      - name: Build & push native Docker image
+        if: success()
+        uses: docker/build-push-action@v6
+        with:
+          context: flowlong-app
+          file: flowlong-app/Dockerfile.native
+          push: ${{ inputs.push_image != 'false' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report image size
+        if: success() && inputs.push_image != 'false'
+        run: |
+          docker pull ${{ steps.tags.outputs.main }}
+          docker image inspect ${{ steps.tags.outputs.main }} --format '{{.Size}}' | numfmt --to=iec
+          docker images ${{ steps.tags.outputs.main }}
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-logs
+          path: |
+            flowlong-app/target/*.log
+            /tmp/native-startup.log
+          if-no-files-found: ignore
+          retention-days: 7

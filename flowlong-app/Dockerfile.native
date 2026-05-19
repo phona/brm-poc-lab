@@ -1,0 +1,32 @@
+# GraalVM Native Image build
+# Build: docker build -f Dockerfile.native -t flowlong-app:native .
+# 注意：build 需要 ~4-8 GB 内存 + 10-15 分钟，本地不推荐，走 CI
+
+FROM ghcr.io/graalvm/native-image-community:17-muslib AS build
+WORKDIR /src
+
+# Maven 不在 native-image-community 镜像里，装一下
+RUN microdnf install -y maven --setopt=install_weak_deps=0 || \
+    (curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz | \
+     tar -xz -C /opt && ln -s /opt/apache-maven-3.9.9/bin/mvn /usr/local/bin/mvn)
+
+COPY pom.xml ./
+# 预拉依赖（CI 缓存友好）
+RUN mvn -B -q -DskipTests dependency:go-offline || true
+
+COPY src ./src
+
+# AOT + native compile，--static-libc=musl 让产物在 alpine/distroless 上跑
+RUN mvn -B -Pnative -DskipTests \
+    -Dspring-boot.aot.skip=false \
+    package
+
+# ---------- runtime ----------
+# distroless：最小、无 shell、无包管理器、安全攻击面小
+FROM gcr.io/distroless/base-debian12 AS runtime
+WORKDIR /app
+COPY --from=build /src/target/flowlong-app /app/flowlong-app
+
+EXPOSE 8082
+# distroless 不提供 sh，直接 exec binary
+ENTRYPOINT ["/app/flowlong-app"]
