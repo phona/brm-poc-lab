@@ -6,8 +6,8 @@
 #   mvn -Pnative -DskipTests package      # 需要本机已装 GraalVM 17
 #   docker build -f Dockerfile.native -t flowlong-app:native .
 
-# distroless：最小、无 shell、攻击面小。debian12 base 自带 glibc 兼容 GraalVM CE 构建产物。
-FROM gcr.io/distroless/base-debian12:nonroot
+# distroless/cc：自带 glibc + libz + libstdc++（base-debian12 缺 libz，native binary 跑不起来）
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 WORKDIR /app
 COPY target/flowlong-app /app/flowlong-app
