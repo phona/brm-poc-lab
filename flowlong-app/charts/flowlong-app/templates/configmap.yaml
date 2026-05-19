@@ -32,6 +32,14 @@ data:
     mybatis-plus:
       configuration:
         map-underscore-to-camel-case: true
+    # OpenAPI / Swagger
+    springdoc:
+      api-docs:
+        path: /v3/api-docs
+      swagger-ui:
+        path: /swagger-ui.html
+        operations-sorter: method
+
     # 可观测性：暴露 /actuator/health 和 /actuator/prometheus
     # health 给 K8s 探针，prometheus 给 GCP Managed Prometheus / 自建 Prom 抓取
     # 其它 actuator endpoint 不暴露（最小化攻击面）

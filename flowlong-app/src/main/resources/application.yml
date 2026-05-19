@@ -25,6 +25,20 @@ mybatis-plus:
 # - health 给容器探针 + 部署侧探活
 # - prometheus 给 GCP Managed Prometheus / 自建 Prom scrape
 # 其它 actuator endpoint 默认不暴露（attack surface 最小化）
+# OpenAPI / Swagger UI
+springdoc:
+  api-docs:
+    path: /v3/api-docs               # JSON: /v3/api-docs    YAML: /v3/api-docs.yaml
+  swagger-ui:
+    path: /swagger-ui.html           # 浏览器入口
+    operations-sorter: method
+  info:
+    title: flowlong-app API
+    description: ttpos 审批引擎（FlowLong 1.2.4 包装）
+    version: 0.1.1
+    contact:
+      name: ttpos team
+
 management:
   endpoints:
     web:
