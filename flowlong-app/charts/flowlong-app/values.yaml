@@ -69,6 +69,13 @@ jvm:
 # 部署环境标签，注入到日志/指标的 env 字段（dev/staging/prod/customer-x）
 deployEnv: prod
 
+# Webhook：FlowLong 内部事件（task / instance）推给 ttpos main 等 caller
+webhook:
+  enabled: false
+  callbackUrl: ""            # 例如 http://ttpos-main.ttpos.svc.cluster.local:8080/internal/flow/webhook
+  timeoutSeconds: 5
+  retryMax: 3
+
 # Prometheus 抓取（可选）：开了之后 Prometheus Operator / GCP Managed Prom 自动发现
 serviceMonitor:
   enabled: false

@@ -28,7 +28,13 @@ data:
     flowlong:
       banner: true
       eventing:
-        task: false
+        task: true
+        instance: true
+      webhook:
+        enabled: {{ .Values.webhook.enabled | default false }}
+        callback-url: {{ .Values.webhook.callbackUrl | default "" | quote }}
+        timeout-seconds: {{ .Values.webhook.timeoutSeconds | default 5 }}
+        retry-max: {{ .Values.webhook.retryMax | default 3 }}
     mybatis-plus:
       configuration:
         map-underscore-to-camel-case: true

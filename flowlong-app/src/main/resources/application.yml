@@ -13,7 +13,17 @@ spring:
 flowlong:
   banner: true
   eventing:
-    task: false
+    task: true       # 启用 TaskEvent 发布到 Spring，给 EventBridge 接
+    instance: true   # 启用 InstanceEvent 发布
+  webhook:
+    enabled: ${WEBHOOK_ENABLED:false}
+    callback-url: ${WEBHOOK_URL:}
+    timeout-seconds: ${WEBHOOK_TIMEOUT:5}
+    retry-max: ${WEBHOOK_RETRY:3}
+    retry-base-delay-ms: 500
+    # 可选签名 header（生产建议加，防止 webhook 端被刷）
+    signature-header: ${WEBHOOK_SIG_HEADER:}
+    signature-value: ${WEBHOOK_SIG_VALUE:}
 
 mybatis-plus:
   configuration:

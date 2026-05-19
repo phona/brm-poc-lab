@@ -1,23 +1,35 @@
 package com.ttpos.flpoc.web;
 
 import com.aizuda.bpm.engine.FlowLongEngine;
+import com.aizuda.bpm.engine.RuntimeService;
+import com.aizuda.bpm.engine.QueryService;
+import com.aizuda.bpm.engine.TaskService;
 import com.aizuda.bpm.engine.core.FlowCreator;
+import com.aizuda.bpm.engine.entity.FlwHisTask;
+import com.aizuda.bpm.engine.entity.FlwHisTaskActor;
 import com.aizuda.bpm.engine.entity.FlwInstance;
+import com.aizuda.bpm.engine.entity.FlwTask;
+import com.aizuda.bpm.engine.entity.FlwTaskActor;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @Tag(name = "flowlong-app", description = "ttpos 审批引擎（FlowLong 1.2.4 包装）。Caller 负责预解析审批人 list，引擎对 ttpos 业务零认知。")
@@ -38,6 +50,8 @@ public class FlowController {
             content = @Content(mediaType = "text/plain", examples = @ExampleObject(value = "ok")))
     @GetMapping("/health")
     public String health() { return "ok"; }
+
+    // ============== 启动流程 ==============
 
     @Operation(
             summary = "启动流程实例",
@@ -82,24 +96,37 @@ public class FlowController {
         }
     }
 
-    @Operation(summary = "审批通过任务", description = "caller 传当前操作人 userId；引擎按 task.actor_id 校验权限，不匹配会失败")
-    @ApiResponse(responseCode = "200", description = "返回 {success: true/false}",
-            content = @Content(schema = @Schema(implementation = Dtos.SkipResponse.class)))
+    // ============== 审批通过（新版 JSON body） ==============
+
+    @Operation(
+            summary = "审批通过任务",
+            description = "caller 用 JSON body 传操作人 + variables。variables.approverIds 可指定下一节点审批人 list（caller 预解析）。" +
+                    "引擎按 task.actor_id 校验权限，不匹配会失败。",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    required = true,
+                    content = @Content(
+                            schema = @Schema(implementation = Dtos.SkipRequest.class),
+                            examples = @ExampleObject(value = "{\"taskId\":2056368596446793733,\"userId\":\"10011\",\"userName\":\"Alice\",\"message\":\"同意\",\"variables\":{\"approverIds\":[\"10013\",\"10014\"]}}")
+                    )
+            )
+    )
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Dtos.SkipResponse.class)))
     @PostMapping("/task/skip")
-    public Map<String, Object> skip(
-            @io.swagger.v3.oas.annotations.Parameter(description = "任务 ID（FlowLong 雪花 long）", required = true, example = "2056368596446793733")
-            @RequestParam Long taskId,
-            @io.swagger.v3.oas.annotations.Parameter(description = "操作人 staff_uuid", required = true, example = "10011")
-            @RequestParam String userId,
-            @io.swagger.v3.oas.annotations.Parameter(description = "操作人显示名", example = "Alice")
-            @RequestParam(defaultValue = "approver") String userName) {
+    public Dtos.SkipResponse skip(@RequestBody Dtos.SkipRequest req) {
         String outcome = "success";
         try {
-            boolean ok = engine.executeTask(taskId,
-                    FlowCreator.of(userId, userName),
-                    new HashMap<>());
-            if (!ok) outcome = "rejected";
-            return Map.of("success", ok);
+            FlowCreator creator = FlowCreator.of(req.userId(), req.userName() == null ? "approver" : req.userName());
+            Map<String, Object> args = req.variables() == null ? new HashMap<>() : new HashMap<>(req.variables());
+            if (req.message() != null) args.put("message", req.message());
+            boolean ok = engine.executeTask(req.taskId(), creator, args);
+
+            // 查实例后状态
+            FlwTask task = engine.queryService().getTask(req.taskId());
+            Long instanceId = task != null ? task.getInstanceId() : null;
+            FlwInstance inst = instanceId == null ? null : engine.queryService().getInstance(instanceId);
+            return new Dtos.SkipResponse(ok,
+                    inst == null ? null : inst.getCurrentNodeKey(),
+                    null); // FlwInstance 上没有 instanceState 字段；要查 his_instance；PoC 略
         } catch (RuntimeException e) {
             outcome = "error";
             throw e;
@@ -108,12 +135,132 @@ public class FlowController {
         }
     }
 
-    @Operation(summary = "查实例下所有任务的参与者", description = "调试/审计用：列出实例当前所有任务以及每个任务被分配到的 actor")
-    @ApiResponse(responseCode = "200", description = "任务参与者列表（一人一行）",
-            content = @Content(array = @io.swagger.v3.oas.annotations.media.ArraySchema(schema = @Schema(implementation = Dtos.InstanceActorRow.class))))
+    // ============== 驳回 ==============
+
+    @Operation(
+            summary = "驳回任务",
+            description = "默认退回上一节点；指定 rejectToNodeKey 退回到指定节点；terminate=true 时直接终止整个实例（业务'驳回'分支用）",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    required = true,
+                    content = @Content(schema = @Schema(implementation = Dtos.RejectRequest.class))
+            )
+    )
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Dtos.RejectResponse.class)))
+    @PostMapping("/task/reject")
+    public Dtos.RejectResponse reject(@RequestBody Dtos.RejectRequest req) {
+        String outcome = "success";
+        try {
+            FlwTask task = engine.queryService().getTask(req.taskId());
+            if (task == null) throw new IllegalArgumentException("task not found: " + req.taskId());
+
+            FlowCreator creator = FlowCreator.of(req.userId(), req.userName() == null ? "rejector" : req.userName());
+            Map<String, Object> args = new HashMap<>();
+            if (req.reason() != null) args.put("reason", req.reason());
+
+            boolean terminate = Boolean.TRUE.equals(req.terminate());
+            var resultOpt = engine.executeRejectTask(task, req.rejectToNodeKey(), creator, args, terminate);
+
+            List<FlwTask> activated = resultOpt.orElse(new ArrayList<>());
+            FlwInstance inst = engine.queryService().getInstance(task.getInstanceId());
+
+            return new Dtos.RejectResponse(
+                    true,
+                    activated.stream().map(this::toTaskInfo).collect(Collectors.toList()),
+                    null  // 同 skip：PoC 不查 his_instance
+            );
+        } catch (RuntimeException e) {
+            outcome = "error";
+            throw e;
+        } finally {
+            meterRegistry.counter("task_reject_total", "outcome", outcome).increment();
+        }
+    }
+
+    // ============== 终止实例 ==============
+
+    @Operation(summary = "强制终止实例", description = "业务'驳回'分支或提交人主动撤回时调用。一旦终止不可恢复，老任务全部置完成。")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Dtos.SkipResponseLegacy.class)))
+    @PostMapping("/instance/{instanceId}/terminate")
+    public Map<String, Object> terminate(
+            @Parameter(description = "流程实例 ID", example = "2056368596446793729") @PathVariable Long instanceId,
+            @RequestBody Dtos.TerminateRequest req) {
+        FlowCreator creator = FlowCreator.of(req.userId(), req.userName() == null ? "terminator" : req.userName());
+        boolean ok = engine.runtimeService().terminate(instanceId, creator);
+        meterRegistry.counter("instance_terminate_total", "outcome", ok ? "success" : "error").increment();
+        return Map.of("success", ok);
+    }
+
+    // ============== 实例详情 ==============
+
+    @Operation(summary = "查实例详情", description = "返回实例当前状态 + 所有进行中的任务 + 任务的 actor")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Dtos.InstanceDetail.class)))
+    @GetMapping("/instance/{instanceId}")
+    public Dtos.InstanceDetail getInstance(@PathVariable Long instanceId) {
+        FlwInstance inst = engine.queryService().getInstance(instanceId);
+        if (inst == null) throw new IllegalArgumentException("instance not found: " + instanceId);
+
+        // 直查 flw_process 拿 processKey（避免再 query）
+        String processKey = jdbc.queryForObject(
+                "SELECT process_key FROM flw_process WHERE id = ?",
+                String.class, inst.getProcessId());
+
+        List<FlwTask> tasks = engine.queryService().getTasksByInstanceId(instanceId);
+        List<Dtos.TaskInfo> taskInfos = tasks.stream().map(this::toTaskInfo).collect(Collectors.toList());
+
+        return new Dtos.InstanceDetail(
+                String.valueOf(inst.getId()),
+                processKey,
+                inst.getBusinessKey(),
+                inst.getCurrentNodeKey(),
+                inst.getCurrentNodeName(),
+                null,  // 当前 instance 表无 state，只 his_instance 有；PoC 略
+                inst.getCreateTime() == null ? null : inst.getCreateTime().getTime(),
+                taskInfos,
+                inst.getTenantId()
+        );
+    }
+
+    // ============== 实例历史 ==============
+
+    @Operation(summary = "查实例历史 timeline", description = "ttpos Timeline 渲染数据源")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Dtos.InstanceHistory.class)))
+    @GetMapping("/instance/{instanceId}/history")
+    public Dtos.InstanceHistory getHistory(@PathVariable Long instanceId) {
+        List<FlwHisTask> hisTasks = engine.queryService().getHisTasksByInstanceId(instanceId)
+                .orElse(new ArrayList<>());
+
+        // 一次性把所有 his_task_actor 拉回来再聚合
+        List<FlwHisTaskActor> hisActors = engine.queryService()
+                .getHisTaskActorsByInstanceId(instanceId)
+                .orElse(new ArrayList<>());
+        Map<Long, List<Dtos.ActorInfo>> actorsByTask = new HashMap<>();
+        for (FlwHisTaskActor a : hisActors) {
+            actorsByTask.computeIfAbsent(a.getTaskId(), k -> new ArrayList<>())
+                    .add(new Dtos.ActorInfo(a.getActorId(), a.getActorName(), a.getActorType()));
+        }
+
+        List<Dtos.HistoryEntry> entries = hisTasks.stream().map(t -> new Dtos.HistoryEntry(
+                String.valueOf(t.getId()),
+                t.getTaskKey(),
+                t.getTaskName(),
+                t.getTaskState() == null ? null : t.getTaskState().intValue(),
+                t.getTaskType() == null ? null : t.getTaskType().intValue(),
+                t.getCreateTime() == null ? null : t.getCreateTime().getTime(),
+                t.getFinishTime() == null ? null : t.getFinishTime().getTime(),
+                t.getDuration(),
+                actorsByTask.getOrDefault(t.getId(), new ArrayList<>())
+        )).collect(Collectors.toList());
+
+        return new Dtos.InstanceHistory(String.valueOf(instanceId), entries);
+    }
+
+    // ============== 调试 / 兼容旧接口 ==============
+
+    @Operation(summary = "查实例下所有任务的参与者（调试用）",
+            description = "推荐用 /instance/{id} 替代；本接口保留用于 debug 直查")
     @GetMapping("/instance/actors")
     public List<Map<String, Object>> actorsOfInstance(
-            @io.swagger.v3.oas.annotations.Parameter(description = "流程实例 ID", required = true, example = "2056368596446793729")
+            @Parameter(description = "流程实例 ID", required = true, example = "2056368596446793729")
             @RequestParam Long instanceId) {
         return jdbc.queryForList(
                 "SELECT t.id AS task_id, t.task_name, t.task_key, a.actor_id, a.actor_name, a.actor_type " +
@@ -122,15 +269,35 @@ public class FlowController {
     }
 
     @Operation(summary = "查某人的待办任务", description = "ttpos main 的审批中心 API 后端")
-    @ApiResponse(responseCode = "200", description = "待办列表，按创建时间倒序",
-            content = @Content(array = @io.swagger.v3.oas.annotations.media.ArraySchema(schema = @Schema(implementation = Dtos.TodoRow.class))))
     @GetMapping("/task/todo")
     public List<Map<String, Object>> todo(
-            @io.swagger.v3.oas.annotations.Parameter(description = "操作人 staff_uuid", required = true, example = "10011")
+            @Parameter(description = "操作人 staff_uuid", required = true, example = "10011")
             @RequestParam String userId) {
         return jdbc.queryForList(
                 "SELECT t.id AS task_id, t.instance_id, t.task_name, t.task_key, t.create_time " +
                         "FROM flw_task t JOIN flw_task_actor a ON a.task_id = t.id " +
                         "WHERE a.actor_id = ? ORDER BY t.create_time DESC", userId);
+    }
+
+    // ============== helpers ==============
+
+    private Dtos.TaskInfo toTaskInfo(FlwTask t) {
+        // 走 JDBC 避免 FlowLong API 不同版本差异
+        List<Dtos.ActorInfo> actorInfos = jdbc.query(
+                "SELECT actor_id, actor_name, actor_type FROM flw_task_actor WHERE task_id = ? ORDER BY id",
+                (rs, n) -> new Dtos.ActorInfo(
+                        rs.getString("actor_id"),
+                        rs.getString("actor_name"),
+                        (Integer) rs.getObject("actor_type")
+                ),
+                t.getId());
+        return new Dtos.TaskInfo(
+                String.valueOf(t.getId()),
+                t.getTaskKey(),
+                t.getTaskName(),
+                t.getTaskType() == null ? null : t.getTaskType().intValue(),
+                t.getPerformType() == null ? null : t.getPerformType().intValue(),
+                actorInfos
+        );
     }
 }
