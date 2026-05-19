@@ -18,6 +18,8 @@ flowlong:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    # GraalVM Native: 显式指定 logger，避免运行时反射探测各种 log impl 类
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 # 可观测性：暴露 /actuator/health 和 /actuator/prometheus
 # - health 给容器探针 + 部署侧探活

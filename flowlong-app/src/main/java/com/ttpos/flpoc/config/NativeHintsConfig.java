@@ -72,6 +72,22 @@ public class NativeHintsConfig {
                 hints.proxies().registerJdkProxy(TypeReference.of(cls));
             }
 
+            // MyBatis logger 实现类（运行时按 try/catch 链探测，native 模式下需要全部注册）
+            for (String cls : new String[]{
+                    "org.apache.ibatis.logging.slf4j.Slf4jImpl",
+                    "org.apache.ibatis.logging.slf4j.Slf4jLoggerImpl",
+                    "org.apache.ibatis.logging.slf4j.Slf4jLocationAwareLoggerImpl",
+                    "org.apache.ibatis.logging.commons.JakartaCommonsLoggingImpl",
+                    "org.apache.ibatis.logging.log4j2.Log4j2Impl",
+                    "org.apache.ibatis.logging.jdk14.Jdk14LoggingImpl",
+                    "org.apache.ibatis.logging.stdout.StdOutImpl",
+                    "org.apache.ibatis.logging.nologging.NoLoggingImpl",
+            }) {
+                hints.reflection().registerTypeIfPresent(classLoader, cls,
+                        MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                        MemberCategory.INVOKE_DECLARED_METHODS);
+            }
+
             // resources：process JSON 文件（classpath:flows/*.json，flowlong 启动时读）
             hints.resources().registerPattern("flows/.*\\.json");
             hints.resources().registerPattern("process-.*\\.json"); // 历史命名兼容
