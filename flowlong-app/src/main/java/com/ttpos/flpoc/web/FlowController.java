@@ -87,7 +87,10 @@ public class FlowController {
             // gap-1: 流程 key 由 caller 通过 flowCode 指定（缺省回退到 PoC 默认流程）
             String flowCode = String.valueOf(body.getOrDefault("flowCode", DEFAULT_FLOW_CODE));
             // gap-8: companyUuid 作为 tenantId 传进引擎（webhook→dispatcher 切库依赖）
-            String tenantId = body.get("companyUuid") == null ? null : String.valueOf(body.get("companyUuid"));
+            // 引擎 startInstanceByProcessKey 第 2 参数是 Integer，JSON 数字可能反序列化为 Integer/Long/String
+            Object companyUuid = body.get("companyUuid");
+            Integer tenantId = companyUuid == null ? null
+                    : (companyUuid instanceof Number n ? n.intValue() : Integer.valueOf(String.valueOf(companyUuid)));
             // gap-7: caller 传的 businessId 映射到 FlowLong 的 businessKey
             if (body.get("businessId") != null) {
                 args.put("businessKey", String.valueOf(body.get("businessId")));
