@@ -79,17 +79,14 @@ public class FlowController {
         Timer.Sample sample = Timer.start(meterRegistry);
         String outcome = "success";
         try {
-            // gap-8: tenantId 走 FlowCreator —— saveInstance 内 setFlowCreator 会把
-            // flowCreator.tenantId 拷进 flw_instance.tenant_id。args 里塞 tenantId 无效，
-            // 因为 createInstance 对 args 只做 putAllVariable（进 variable JSON 列，不进字段列）。
-            String tenantId = body.get("companyUuid") == null ? null : String.valueOf(body.get("companyUuid"));
-            FlowCreator creator = tenantId == null
-                    ? FlowCreator.of(
-                            String.valueOf(body.getOrDefault("userId", "u1")),
-                            String.valueOf(body.getOrDefault("userName", "anon")))
-                    : FlowCreator.of(tenantId,
-                            String.valueOf(body.getOrDefault("userId", "u1")),
-                            String.valueOf(body.getOrDefault("userName", "anon")));
+            // gap-8 撤销：不把 companyUuid 传进引擎的 tenant 机制。
+            // FlowLong 的 tenant_id 是「流程定义 + 实例」共用的逻辑分区键，传进去会导致
+            // 流程定义查找 (getProcessByVersion) 也按该 tenant 过滤 → 全局部署的流程找不到。
+            // 本引擎独立运行、不按公司分库，companyUuid 只是业务元数据：
+            // 它已随 args 进入实例 variable JSON，webhook 由此带出，dispatcher 自行路由。
+            FlowCreator creator = FlowCreator.of(
+                    String.valueOf(body.getOrDefault("userId", "u1")),
+                    String.valueOf(body.getOrDefault("userName", "anon")));
             Map<String, Object> args = new HashMap<>(body);
 
             // gap-1: 流程 key 由 caller 通过 flowCode 指定（缺省回退到 PoC 默认流程）
