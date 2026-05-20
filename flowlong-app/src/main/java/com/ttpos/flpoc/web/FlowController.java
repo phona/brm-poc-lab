@@ -35,6 +35,9 @@ import java.util.stream.Collectors;
 @Tag(name = "flowlong-app", description = "ttpos 审批引擎（FlowLong 1.2.4 包装）。Caller 负责预解析审批人 list，引擎对 ttpos 业务零认知。")
 public class FlowController {
 
+    /** gap-1: caller 未指定 flowCode 时回退的 PoC 默认流程 key */
+    private static final String DEFAULT_FLOW_CODE = "ttpos_transfer_test";
+
     private final FlowLongEngine engine;
     private final JdbcTemplate jdbc;
     private final MeterRegistry meterRegistry;
@@ -80,7 +83,17 @@ public class FlowController {
                     String.valueOf(body.getOrDefault("userId", "u1")),
                     String.valueOf(body.getOrDefault("userName", "anon")));
             Map<String, Object> args = new HashMap<>(body);
-            FlwInstance inst = engine.startInstanceByProcessKey("ttpos_transfer_test", null, creator, args)
+
+            // gap-1: 流程 key 由 caller 通过 flowCode 指定（缺省回退到 PoC 默认流程）
+            String flowCode = String.valueOf(body.getOrDefault("flowCode", DEFAULT_FLOW_CODE));
+            // gap-8: companyUuid 作为 tenantId 传进引擎（webhook→dispatcher 切库依赖）
+            String tenantId = body.get("companyUuid") == null ? null : String.valueOf(body.get("companyUuid"));
+            // gap-7: caller 传的 businessId 映射到 FlowLong 的 businessKey
+            if (body.get("businessId") != null) {
+                args.put("businessKey", String.valueOf(body.get("businessId")));
+            }
+
+            FlwInstance inst = engine.startInstanceByProcessKey(flowCode, tenantId, creator, args)
                     .orElseThrow(() -> new IllegalStateException("start returned empty"));
             Map<String, Object> out = new HashMap<>();
             out.put("instanceId", String.valueOf(inst.getId()));

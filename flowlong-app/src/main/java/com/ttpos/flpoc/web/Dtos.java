@@ -13,7 +13,7 @@ public class Dtos {
 
     // ========= 启动 =========
 
-    @Schema(description = "启动流程实例请求体。flowCode 在 PoC 中硬编码为 ttpos_transfer_test；" +
+    @Schema(description = "启动流程实例请求体。flowCode 指定流程定义（缺省回退 ttpos_transfer_test）；" +
             "approverIds 或 approvers 二选一（caller 在调用前预解析好审批人列表）。")
     public record StartFlowRequest(
             @Schema(description = "发起人 ID（业务系统的 staff_uuid 字符串）", example = "10011", requiredMode = Schema.RequiredMode.REQUIRED)
@@ -24,6 +24,8 @@ public class Dtos {
             Long companyUuid,
             @Schema(description = "业务单据号（订单号 / 调拨单号等），便于反查", example = "TR-20260519-001")
             String businessId,
+            @Schema(description = "流程定义 key（对应 flw_process.process_key）；缺省回退到 ttpos_transfer_test", example = "ttpos_transfer_test")
+            String flowCode,
             @Schema(description = "审批人 ID 列表（简单形式，无显示名）；和 approvers 二选一", example = "[\"10011\",\"10012\"]")
             List<String> approverIds,
             @Schema(description = "审批人结构化列表（含显示名，方便审计），格式 [{id,name}]；和 approverIds 二选一")

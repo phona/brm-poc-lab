@@ -86,8 +86,10 @@ public class ProcessController {
                         String.valueOf(rs.getLong("id")),
                         rs.getString("process_key"),
                         rs.getString("process_name"),
-                        (Integer) rs.getObject("process_version"),
-                        (Integer) rs.getObject("process_state")
+                        // tinyint(1) 在 MySQL 驱动默认 tinyInt1isBit=true 下会回 Boolean，
+                        // 强转 Integer 触发 ClassCastException —— 统一用 getInt 取
+                        rs.getObject("process_version") == null ? null : rs.getInt("process_version"),
+                        rs.getObject("process_state") == null ? null : rs.getInt("process_state")
                 ));
     }
 
