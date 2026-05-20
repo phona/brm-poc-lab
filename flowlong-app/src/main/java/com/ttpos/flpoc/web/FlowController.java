@@ -79,26 +79,30 @@ public class FlowController {
         Timer.Sample sample = Timer.start(meterRegistry);
         String outcome = "success";
         try {
-            FlowCreator creator = FlowCreator.of(
-                    String.valueOf(body.getOrDefault("userId", "u1")),
-                    String.valueOf(body.getOrDefault("userName", "anon")));
+            // gap-8: tenantId 走 FlowCreator —— saveInstance 内 setFlowCreator 会把
+            // flowCreator.tenantId 拷进 flw_instance.tenant_id。args 里塞 tenantId 无效，
+            // 因为 createInstance 对 args 只做 putAllVariable（进 variable JSON 列，不进字段列）。
+            String tenantId = body.get("companyUuid") == null ? null : String.valueOf(body.get("companyUuid"));
+            FlowCreator creator = tenantId == null
+                    ? FlowCreator.of(
+                            String.valueOf(body.getOrDefault("userId", "u1")),
+                            String.valueOf(body.getOrDefault("userName", "anon")))
+                    : FlowCreator.of(tenantId,
+                            String.valueOf(body.getOrDefault("userId", "u1")),
+                            String.valueOf(body.getOrDefault("userName", "anon")));
             Map<String, Object> args = new HashMap<>(body);
 
             // gap-1: 流程 key 由 caller 通过 flowCode 指定（缺省回退到 PoC 默认流程）
             String flowCode = String.valueOf(body.getOrDefault("flowCode", DEFAULT_FLOW_CODE));
-            // gap-8: tenantId 通过 args 传给引擎。
-            // 注意：startInstanceByProcessKey 第 2 参数是「流程版本号 version」而非 tenantId，
-            // 必须传 null 表示取最新激活版本；传非 null 会被当成 version 去 getProcessByVersion，
-            // companyUuid(如 1001) 当 version 找不到 → "process key does not exist"。
-            if (body.get("companyUuid") != null) {
-                args.put("tenantId", String.valueOf(body.get("companyUuid")));
-            }
-            // gap-7: caller 传的 businessId 映射到 FlowLong 的 businessKey
-            if (body.get("businessId") != null) {
-                args.put("businessKey", String.valueOf(body.get("businessId")));
-            }
 
-            FlwInstance inst = engine.startInstanceByProcessKey(flowCode, null, creator, args)
+            // gap-7: businessKey 走 6 参重载的 Supplier<FlwInstance>。
+            // businessKey 同样不能走 args（进的是 variable 列），只能由 supplier 提供的实例携带。
+            String businessId = body.get("businessId") == null ? null : String.valueOf(body.get("businessId"));
+
+            // 第 2 参数 version 传 null = 取最新激活版本（非 null 会当版本号去 getProcessByVersion）
+            FlwInstance inst = engine.startInstanceByProcessKey(
+                            flowCode, null, creator, args, false,
+                            businessId == null ? null : () -> FlwInstance.of(businessId))
                     .orElseThrow(() -> new IllegalStateException("start returned empty"));
             Map<String, Object> out = new HashMap<>();
             out.put("instanceId", String.valueOf(inst.getId()));
