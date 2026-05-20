@@ -86,17 +86,19 @@ public class FlowController {
 
             // gap-1: 流程 key 由 caller 通过 flowCode 指定（缺省回退到 PoC 默认流程）
             String flowCode = String.valueOf(body.getOrDefault("flowCode", DEFAULT_FLOW_CODE));
-            // gap-8: companyUuid 作为 tenantId 传进引擎（webhook→dispatcher 切库依赖）
-            // 引擎 startInstanceByProcessKey 第 2 参数是 Integer，JSON 数字可能反序列化为 Integer/Long/String
-            Object companyUuid = body.get("companyUuid");
-            Integer tenantId = companyUuid == null ? null
-                    : (companyUuid instanceof Number n ? n.intValue() : Integer.valueOf(String.valueOf(companyUuid)));
+            // gap-8: tenantId 通过 args 传给引擎。
+            // 注意：startInstanceByProcessKey 第 2 参数是「流程版本号 version」而非 tenantId，
+            // 必须传 null 表示取最新激活版本；传非 null 会被当成 version 去 getProcessByVersion，
+            // companyUuid(如 1001) 当 version 找不到 → "process key does not exist"。
+            if (body.get("companyUuid") != null) {
+                args.put("tenantId", String.valueOf(body.get("companyUuid")));
+            }
             // gap-7: caller 传的 businessId 映射到 FlowLong 的 businessKey
             if (body.get("businessId") != null) {
                 args.put("businessKey", String.valueOf(body.get("businessId")));
             }
 
-            FlwInstance inst = engine.startInstanceByProcessKey(flowCode, tenantId, creator, args)
+            FlwInstance inst = engine.startInstanceByProcessKey(flowCode, null, creator, args)
                     .orElseThrow(() -> new IllegalStateException("start returned empty"));
             Map<String, Object> out = new HashMap<>();
             out.put("instanceId", String.valueOf(inst.getId()));
