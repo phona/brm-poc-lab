@@ -21,6 +21,7 @@
         <flowlong.version>1.2.4</flowlong.version>
         <mybatis-plus.version>3.5.14</mybatis-plus.version>
         <logstash-encoder.version>7.4</logstash-encoder.version>
+        <rocketmq-client.version>4.9.7</rocketmq-client.version>
     </properties>
 
     <dependencies>
@@ -67,6 +68,15 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.5.0</version>
+        </dependency>
+
+        <!-- RocketMQ producer：与 webhook 双轨投递审批流事件。
+             不用 rocketmq-spring-boot-starter（2.3.x 对 Spring Boot 3 兼容不稳定），
+             直接用 4.x 原生 client 写一个小 producer bean，配置最少依赖最干净。-->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq-client.version}</version>
         </dependency>
     </dependencies>
 

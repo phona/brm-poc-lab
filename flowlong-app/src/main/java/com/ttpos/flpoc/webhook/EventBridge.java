@@ -15,19 +15,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把 FlowLong 内部的 TaskEvent / InstanceEvent 桥接成 webhook 推给 ttpos main。
+ * 把 FlowLong 内部的 TaskEvent / InstanceEvent 桥接成 RocketMQ 消息推给 ttpos main。
  * Spring 自动调度 @EventListener；event 由 FlowLong autoconfigure 在
  * flowlong.eventing.task=true / instance=true 时发布。
+ *
+ * RocketMQ 是唯一投递通道（vm04 联调起改造；系统未上线，无后向兼容）。
+ * 多 review env 隔离：每个 env 配自己的 RocketMQ tag，ttpos 侧按 tag filter 消费。
  */
 @Component
 public class EventBridge {
 
     private static final Logger log = LoggerFactory.getLogger(EventBridge.class);
 
-    private final WebhookSender sender;
+    private final RocketMQEventSender mqSender;
 
-    public EventBridge(WebhookSender sender) {
-        this.sender = sender;
+    public EventBridge(RocketMQEventSender mqSender) {
+        this.mqSender = mqSender;
     }
 
     @EventListener
@@ -79,7 +82,7 @@ public class EventBridge {
 
             payload.put("actors", toActorList(event.getTaskActors()));
 
-            sender.send(payload);
+            mqSender.send(payload);
         } catch (Exception e) {
             log.warn("on TaskEvent failed: {}", e.toString());
         }
@@ -109,7 +112,7 @@ public class EventBridge {
                 ));
             }
 
-            sender.send(payload);
+            mqSender.send(payload);
         } catch (Exception e) {
             log.warn("on InstanceEvent failed: {}", e.toString());
         }

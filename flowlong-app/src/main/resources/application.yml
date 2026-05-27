@@ -15,15 +15,23 @@ flowlong:
   eventing:
     task: true       # 启用 TaskEvent 发布到 Spring，给 EventBridge 接
     instance: true   # 启用 InstanceEvent 发布
-  webhook:
-    enabled: ${WEBHOOK_ENABLED:false}
-    callback-url: ${WEBHOOK_URL:}
-    timeout-seconds: ${WEBHOOK_TIMEOUT:5}
-    retry-max: ${WEBHOOK_RETRY:3}
-    retry-base-delay-ms: 500
-    # 可选签名 header（生产建议加，防止 webhook 端被刷）
-    signature-header: ${WEBHOOK_SIG_HEADER:}
-    signature-value: ${WEBHOOK_SIG_VALUE:}
+  # RocketMQ 投递（唯一通道；系统未上线，无 webhook 后向兼容）。
+  # 多 review env 场景：每个 env 用各自 tag 推消息（如 pr448 / prod），
+  # ttpos 侧按 tag filter + 独立 consumer group 消费实现隔离。
+  rocketmq:
+    enabled: ${ROCKETMQ_ENABLED:true}
+    name-server: ${ROCKETMQ_NAME_SERVER:}
+    producer-group: ${ROCKETMQ_PRODUCER_GROUP:flowlong-app-producer}
+    topic: ${ROCKETMQ_TOPIC:approval.flow.event}
+    tag: ${ROCKETMQ_TAG:}
+    access-key: ${ROCKETMQ_ACCESS_KEY:}
+    secret-key: ${ROCKETMQ_SECRET_KEY:}
+    send-timeout-ms: ${ROCKETMQ_SEND_TIMEOUT_MS:3000}
+    retry-max: ${ROCKETMQ_RETRY_MAX:2}
+    # 启动期建 topic（idempotent）。prod 应关闭并用 K8s pre-install Job + mqadmin
+    # 显式建 topic，把 retention / 权限纳入 IaC；联调 / dev 保持 true 自动建。
+    auto-create-topic: ${ROCKETMQ_AUTO_CREATE_TOPIC:true}
+    queue-nums: ${ROCKETMQ_QUEUE_NUMS:4}
 
 mybatis-plus:
   configuration:

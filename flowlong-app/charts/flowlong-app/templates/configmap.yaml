@@ -30,11 +30,18 @@ data:
       eventing:
         task: true
         instance: true
-      webhook:
-        enabled: {{ .Values.webhook.enabled | default false }}
-        callback-url: {{ .Values.webhook.callbackUrl | default "" | quote }}
-        timeout-seconds: {{ .Values.webhook.timeoutSeconds | default 5 }}
-        retry-max: {{ .Values.webhook.retryMax | default 3 }}
+      # RocketMQ：引擎事件投递唯一通道（vm04 联调起改造；无 webhook 后向兼容）。
+      # access-key / secret-key 不进 ConfigMap，由 env 注入（见 deployment.yaml）。
+      rocketmq:
+        enabled: {{ .Values.rocketmq.enabled | default true }}
+        name-server: {{ .Values.rocketmq.nameServer | default "" | quote }}
+        producer-group: {{ .Values.rocketmq.producerGroup | default "flowlong-app-producer" | quote }}
+        topic: {{ .Values.rocketmq.topic | default "approval.flow.event" | quote }}
+        tag: {{ .Values.rocketmq.tag | default "" | quote }}
+        send-timeout-ms: {{ .Values.rocketmq.sendTimeoutMs | default 3000 }}
+        retry-max: {{ .Values.rocketmq.retryMax | default 2 }}
+        auto-create-topic: {{ .Values.rocketmq.autoCreateTopic | default true }}
+        queue-nums: {{ .Values.rocketmq.queueNums | default 4 }}
     mybatis-plus:
       configuration:
         map-underscore-to-camel-case: true

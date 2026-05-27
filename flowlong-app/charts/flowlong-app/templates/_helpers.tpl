@@ -66,3 +66,14 @@ DB secret name — existing or auto-created
 {{- printf "%s-db" (include "flowlong-app.fullname" .) }}
 {{- end }}
 {{- end }}
+
+{{/*
+RocketMQ ACL secret name — existing or auto-created
+*/}}
+{{- define "flowlong-app.rocketmqSecretName" -}}
+{{- if .Values.rocketmq.existingSecret }}
+{{- .Values.rocketmq.existingSecret }}
+{{- else }}
+{{- printf "%s-rocketmq" (include "flowlong-app.fullname" .) }}
+{{- end }}
+{{- end }}

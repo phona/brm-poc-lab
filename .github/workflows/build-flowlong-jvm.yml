@@ -8,6 +8,12 @@ on:
       - 'flowlong-app/src/**'
       - 'flowlong-app/Dockerfile'
       - '.github/workflows/build-flowlong-jvm.yml'
+  pull_request:
+    paths:
+      - 'flowlong-app/pom.xml'
+      - 'flowlong-app/src/**'
+      - 'flowlong-app/Dockerfile'
+      - '.github/workflows/build-flowlong-jvm.yml'
   workflow_dispatch:
     inputs:
       version_tag:
@@ -40,13 +46,30 @@ jobs:
       - name: Compute image tags
         id: tags
         run: |
-          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-8)
-          TAGS="${{ env.IMAGE_NAME }}:jvm-${SHA_SHORT},${{ env.IMAGE_NAME }}:jvm-latest"
-          if [ -n "${{ inputs.version_tag }}" ]; then
-            TAGS="${TAGS},${{ env.IMAGE_NAME }}:${{ inputs.version_tag }}"
+          # PR build 用 pull_request.head.sha（不是 merge commit），方便追溯
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            COMMIT_SHA="${{ github.sha }}"
           fi
+          SHA_SHORT=$(echo "${COMMIT_SHA}" | cut -c1-8)
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR build：用 jvm-pr-<num>-<sha>，避免 jvm-latest 冲突；同时也打 jvm-pr-<num>
+            # 让联调环境可以无视 sha 直接 pull 最新
+            PR_NUM="${{ github.event.pull_request.number }}"
+            TAGS="${{ env.IMAGE_NAME }}:jvm-pr-${PR_NUM}-${SHA_SHORT},${{ env.IMAGE_NAME }}:jvm-pr-${PR_NUM}"
+            MAIN_TAG="${{ env.IMAGE_NAME }}:jvm-pr-${PR_NUM}-${SHA_SHORT}"
+          else
+            TAGS="${{ env.IMAGE_NAME }}:jvm-${SHA_SHORT},${{ env.IMAGE_NAME }}:jvm-latest"
+            MAIN_TAG="${{ env.IMAGE_NAME }}:jvm-${SHA_SHORT}"
+            if [ -n "${{ inputs.version_tag }}" ]; then
+              TAGS="${TAGS},${{ env.IMAGE_NAME }}:${{ inputs.version_tag }}"
+            fi
+          fi
+
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-          echo "main=${{ env.IMAGE_NAME }}:jvm-${SHA_SHORT}" >> $GITHUB_OUTPUT
+          echo "main=${MAIN_TAG}" >> $GITHUB_OUTPUT
           echo "Tags: ${TAGS}"
 
       - name: Set up Docker Buildx

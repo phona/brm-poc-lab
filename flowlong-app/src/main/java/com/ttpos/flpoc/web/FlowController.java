@@ -83,7 +83,7 @@ public class FlowController {
             // FlowLong 的 tenant_id 是「流程定义 + 实例」共用的逻辑分区键，传进去会导致
             // 流程定义查找 (getProcessByVersion) 也按该 tenant 过滤 → 全局部署的流程找不到。
             // 本引擎独立运行、不按公司分库，companyUuid 只是业务元数据：
-            // 它已随 args 进入实例 variable JSON，webhook 由此带出，dispatcher 自行路由。
+            // 它已随 args 进入实例 variable JSON，RocketMQ 由此带出，dispatcher 自行路由。
             FlowCreator creator = FlowCreator.of(
                     String.valueOf(body.getOrDefault("userId", "u1")),
                     String.valueOf(body.getOrDefault("userName", "anon")));
