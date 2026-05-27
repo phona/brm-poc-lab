@@ -47,8 +47,28 @@ public class EventBridge {
                 payload.put("createTimeMs", task.getCreateTime() == null ? null : task.getCreateTime().getTime());
             }
 
-            payload.put("nodeKey", event.getNodeModel() == null ? null : event.getNodeModel().getNodeKey());
-            payload.put("nodeName", event.getNodeModel() == null ? null : event.getNodeModel().getNodeName());
+            String nodeKey = null;
+            String nodeName = null;
+            if (event.getNodeModel() != null) {
+                nodeKey = event.getNodeModel().getNodeKey();
+                nodeName = event.getNodeModel().getNodeName();
+            }
+            // flowlong v1.2.4 TaskServiceImpl#taskNotify 在 COMPLETE 路径 by design 传 nodeModel=null，
+            // 节点信息从 flwTask.taskKey 取（flwTask 创建时已复制 nodeModel.nodeKey/nodeName）。
+            if (nodeKey == null && task != null) {
+                nodeKey = task.getTaskKey();
+            }
+            if (nodeName == null && task != null) {
+                nodeName = task.getTaskName();
+            }
+            if (nodeKey == null) {
+                log.warn("TaskEvent without nodeKey: eventType={} taskId={} instanceId={}",
+                        event.getEventType(),
+                        task == null ? null : task.getId(),
+                        task == null ? null : task.getInstanceId());
+            }
+            payload.put("nodeKey", nodeKey);
+            payload.put("nodeName", nodeName);
 
             if (event.getFlowCreator() != null) {
                 payload.put("creator", Map.of(
