@@ -5,6 +5,7 @@ import com.aizuda.bpm.engine.RuntimeService;
 import com.aizuda.bpm.engine.QueryService;
 import com.aizuda.bpm.engine.TaskService;
 import com.aizuda.bpm.engine.core.FlowCreator;
+import com.aizuda.bpm.engine.entity.FlwHisInstance;
 import com.aizuda.bpm.engine.entity.FlwHisTask;
 import com.aizuda.bpm.engine.entity.FlwHisTaskActor;
 import com.aizuda.bpm.engine.entity.FlwInstance;
@@ -216,7 +217,16 @@ public class FlowController {
     @GetMapping("/instance/{instanceId}")
     public Dtos.InstanceDetail getInstance(@PathVariable Long instanceId) {
         FlwInstance inst = engine.queryService().getInstance(instanceId);
-        if (inst == null) throw new IllegalArgumentException("instance not found: " + instanceId);
+        if (inst == null) {
+            // 活动表查不到：实例可能已 end 并归档到 his_instance。回查历史表，
+            // 命中即返回 200 + 终态（instanceState 非空、activeTasks 为空），让 caller
+            // 把「已结束」当正常结果而非错误——避免 caller 对稳定终态做无谓重试空耗
+            // （ttpos #689：caller 对 500 退避 3.5s）。两表都无才是真「不存在/未就绪」，
+            // 仍抛异常（500 可重试），保留提交瞬间实例尚未可见的竞态覆盖。
+            FlwHisInstance his = engine.queryService().getHistInstance(instanceId);
+            if (his == null) throw new IllegalArgumentException("instance not found: " + instanceId);
+            return toHistoryDetail(his);
+        }
 
         // 直查 flw_process 拿 processKey（避免再 query）
         String processKey = jdbc.queryForObject(
@@ -232,10 +242,32 @@ public class FlowController {
                 inst.getBusinessKey(),
                 inst.getCurrentNodeKey(),
                 inst.getCurrentNodeName(),
-                null,  // 当前 instance 表无 state，只 his_instance 有；PoC 略
+                null,  // 当前 instance 表无 state（活动=审批中），只 his_instance 有终态
                 inst.getCreateTime() == null ? null : inst.getCreateTime().getTime(),
                 taskInfos,
                 inst.getTenantId()
+        );
+    }
+
+    /**
+     * 已归档（his_instance）实例 → InstanceDetail。
+     * instanceState 取历史终态值（0 审批中 1 通过 2 拒绝 3 撤销 4 超时 5 强制终止 6 自动通过 7 自动拒绝）；
+     * 实例已结束无活动任务，activeTasks 返回空。
+     */
+    private Dtos.InstanceDetail toHistoryDetail(FlwHisInstance his) {
+        String processKey = jdbc.queryForObject(
+                "SELECT process_key FROM flw_process WHERE id = ?",
+                String.class, his.getProcessId());
+        return new Dtos.InstanceDetail(
+                String.valueOf(his.getId()),
+                processKey,
+                his.getBusinessKey(),
+                his.getCurrentNodeKey(),
+                his.getCurrentNodeName(),
+                his.getInstanceState(),
+                his.getCreateTime() == null ? null : his.getCreateTime().getTime(),
+                new ArrayList<>(),
+                his.getTenantId()
         );
     }
 
