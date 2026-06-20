@@ -64,6 +64,18 @@ spec:
                   key: password
             - name: DEPLOY_ENV
               value: {{ .Values.deployEnv | default "prod" | quote }}
+            {{- if or .Values.rocketmq.existingSecret .Values.rocketmq.accessKey }}
+            - name: ROCKETMQ_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "flowlong-app.rocketmqSecretName" . }}
+                  key: access-key
+            - name: ROCKETMQ_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "flowlong-app.rocketmqSecretName" . }}
+                  key: secret-key
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -69,12 +69,26 @@ jvm:
 # 部署环境标签，注入到日志/指标的 env 字段（dev/staging/prod/customer-x）
 deployEnv: prod
 
-# Webhook：FlowLong 内部事件（task / instance）推给 ttpos main 等 caller
-webhook:
-  enabled: false
-  callbackUrl: ""            # 例如 http://ttpos-main.ttpos.svc.cluster.local:8080/internal/flow/webhook
-  timeoutSeconds: 5
-  retryMax: 3
+# RocketMQ：FlowLong 内部事件（task / instance）通过 MQ 推给 ttpos main 等下游。
+# 引擎事件投递的唯一通道（vm04 联调起改造；无 webhook 后向兼容）。
+# 多 review env 隔离：每个 env 配自己的 tag，下游按 tag filter + 独立 consumer group 消费。
+rocketmq:
+  enabled: true
+  nameServer: ""             # 例如 ttpos-arch-lab-rocketmq-nameserver.ttpos-arch-lab.svc.cluster.local:9876
+  producerGroup: flowlong-app-producer
+  topic: approval.flow.event
+  tag: ""                    # 多租户路由 tag，例如 "pr448" / "prod"；空 = 不打 tag
+  sendTimeoutMs: 3000
+  retryMax: 2
+  # 启动期建 topic（idempotent）。prod 推荐设 false 并用 Helm pre-install Job +
+  # mqadmin updateTopic 把 retention / 权限纳入 IaC；dev/lab 保持 true 自动建。
+  autoCreateTopic: true
+  queueNums: 4
+  # ACL 凭证。推荐用 existingSecret（已存在的 K8s Secret，含 access-key/secret-key 两个 key）。
+  # 留空 = 不启用 ACL（broker 也得没开 aclEnable）。
+  existingSecret: ""
+  accessKey: ""              # 仅 existingSecret 为空且非空时生效（不推荐生产用）
+  secretKey: ""
 
 # Prometheus 抓取（可选）：开了之后 Prometheus Operator / GCP Managed Prom 自动发现
 serviceMonitor:
